@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html>
+  <head>
+	<link rel="stylesheet" href="styles.css">
+	<title>PP-INA228 v0.0</title>
+	<script type="text/javascript" src="dygraph.js"></script>
+	<script type="text/javascript" src="serial.js"></script>
+	<script type="text/javascript" src="pp.js"></script>
+	<script type="text/javascript" src="synchronizer.js"></script>
+  </head>
+  <body>
+	<div style="height: auto; width: auto; background-color: #101015; color: white;border-style: none;">
+	<input type="button" id="butConnect" value="Open">
+	 INA228 speed:
+	<select id="ina228Speed" title="Conversion speed per channel">
+		<option value="0">20000 SPS (50 us)</option>
+		<option value="1" selected>11905 SPS (84 us)</option>
+		<option value="2">6666 SPS (150 us)</option>
+		<option value="3">3571 SPS (280 us)</option>
+		<option value="4">1851 SPS (540 us)</option>
+		<option value="5">950 SPS (1052 us)</option>
+		<option value="6">482 SPS (2074 us)</option>
+		<option value="7">242 SPS (4120 us)</option>
+	</select>
+	 Display:
+	<label><input type="checkbox" id="rawDataMode"> Raw data</label>
+	<select id="rawWindowSec" title="Displayed time window and raw sample buffer length">
+		<option value="10">10 s</option>
+		<option value="30">30 s</option>
+		<option value="60" selected>1 min</option>
+		<option value="120">2 min</option>
+		<option value="300">5 min</option>
+	</select>
+	<span id="rawStats" title="Raw samples kept in memory"></span>
+	 Average: <input type="radio" value="100" name="radiobx" onclick="SetAverage(1000);"/>100
+	 <input type="radio" value="50" name="radiobx" onclick="SetAverage(100);"/>50
+	 <input type="radio" value="20" name="radiobx" onclick="SetAverage(200);"/>20
+	 <input type="radio" value="10" name="radiobx" onclick="SetAverage(100);"/>10
+	 <input type="radio" value="5" name="radiobx" onclick="SetAverage(50);"/>5
+	 <input type="radio" value="2" name="radiobx" checked  onclick="SetAverage(20);"/>2
+	 <input type="radio" value="1" name="radiobx" onclick="SetAverage(10);"/>1 sec	<span id="info">Select 'Open'</span><br>
+	<table id="tsens" style="text-align: center; ">
+  	<tr>
+	<td style="color: SpringGreen;">Current</td> 
+	<td style="color: Yellow;">Voltage</td>
+	<td style="color: LightSkyBlue;">Power</td>
+	<td style="color: LightPink;">Resistance</td>
+	</tr>
+	<tr style="font-weight: bold; font-family: Arial, Helvetica, sans-serif;">
+	<td id="ts1" style="color: SpringGreen;">? mA</td> 
+	<td id="ts2" style="color: Yellow;">? mV</td>
+	<td id="ts3" style="color: LightSkyBlue;">? W</td>
+	<td id="ts4" style="color: LightPink;">? Ohm</td>
+	</tr>
+	</table>
+	<div id="div_g1"></div>
+	<div id="labdiv1" style="text-align: center;"></div>
+	<div id="div_g2"></div>
+	<div id="labdiv2" style="text-align: center;"></div>
+	<div style="margin-top: 8px; color: LightSkyBlue;">Digital inputs
+		<span id="dioMask" style="margin-left: 12px;">mask: 0x00</span>
+	</div>
+	<div id="dioStatus" style="font-family: monospace; margin: 4px 0 6px 0;"></div>
+	<div id="div_g3"></div>
+	<input type="button" id="butOnOff" value="Stop">
+	<input type="button" id="butClr" value="Clear">
+	<input type="button" id="butSave" value="Save dat to .csv file">
+	 Window: <span id="wdsize">?</span> sec
+	 <span title="The point under the mouse cursor stays fixed while zooming">Left drag: pan, wheel: zoom, double-click: full view</span>
+	<input type="radio" checked name="rm1"  id="FixEnd"/>
+	<label for="FixEnd">Fixed</label>
+	<input type="radio" name="rm1" id="FixNone"/>
+	<label for="FixNone">Float</label><br>
+	</div>
+  </body>
+<script type="text/javascript">
+"use strict";
+
+// Буфер входящих данных
+var datau = new Array();
+var datai = new Array();
+var rawBuffer = null;
+//
+const samples = 3000;
+var rawWindowSec = 60;
+const RAW_DRAW_POINTS_MAX = 3000;
+var average = 50; // ms * RENDER_FPS
+const RENDER_FPS = 10; // frames per sec	
+//
+var cur_idx = -1;
+var rend = 1;
+var rollpu = 1;
+var rollpi = 1;
+var guu = null;
+var gui = null;
+var gdio = null;
+var rend_timer;
+var dataDio = new Array();
+var dio_last = 0;
+var dio_sample_count = 0;
+var rawMode = false;
+var graphDataU = datau;
+var graphDataI = datai;
+var userTimeWindow = false;
+var followLeftEdge = false;
+var followRightEdge = false;
+var requestedTimeWindow = null;
+var renderRequested = false;
+var forceRawDecimation = true;
+var rawDecimationRange = null;
+var rawDecimationTime = 0;
+var wheelDecimationTimer = null;
+var pendingWindowFrame = null;
+var pendingDisplayWindow = null;
+
+var $ = function(id) { return document.getElementById(id); }
+
+function infoline(s) { $('info').innerHTML = s; console.log(s); }
+function errline(s) { $('info').innerHTML = s; console.error(s); }
+
+const spinfo = $(info);
+const butstop = $('butOnOff');
+const butconnect = $('butConnect');
+const butclear = $("butClr");
+
+var	pp = new PPdev();
+pp.open_cb = function () { 
+	butconnect.value = 'Close';
+	console.log("pp.open_cb");
+}
+pp.close_cb = function () { 
+	butconnect.value = 'Open'; 
+	console.log("pp.close_cb");
+}
+pp.start_cb = function () { 
+	console.log("pp.start_cb");
+}
+pp.stop_cb = function () { 
+	cur_idx = -1;
+	UpdateIntervalGRF(false);
+	console.log("pp.stop_cb");
+}
+pp.new_adc_cb = AddData2Grf;
+
+var ina228SpeedChanging = false;
+var ina228Speeds = [
+	{index: 0, sps: 20000, time_us: 50},
+	{index: 1, sps: 11905, time_us: 84},
+	{index: 2, sps: 6666, time_us: 150},
+	{index: 3, sps: 3571, time_us: 280},
+	{index: 4, sps: 1851, time_us: 540},
+	{index: 5, sps: 950, time_us: 1052},
+	{index: 6, sps: 482, time_us: 2074},
+	{index: 7, sps: 242, time_us: 4120}
+];
+
+async function SetINA228Speed(value) {
+	if(ina228SpeedChanging)
+		return;
+	var speed = ina228Speeds[Number(value)];
+	if(speed == null)
+		return;
+
+	var select = $("ina228Speed");
+	var running = pp.dev.open && pp.dev.adc_wrk && pp.cfg != null && pp.cfg.name == "INA228";
+	ina228SpeedChanging = true;
+	select.disabled = true;
+	try {
+		if(running)
+			await pp.Stop();
+
+		config_ina228.time_us = speed.time_us;
+		config_ina228.init[3][2] = 0xB000 |
+			(speed.index << 3) | (speed.index << 6) | (speed.index << 9);
+		config_ina228.t_us = config_ina228.time_us << (config_ina228.multiplier + 1);
+		config_ina228.sps = (2000000.0/config_ina228.chnls)/config_ina228.t_us;
+
+		if(running) {
+			cur_idx = -1;
+			await pp.SendConfig(config_ina228);
+			infoline("INA228: " + speed.sps + " SPS selected");
+		} else {
+			infoline("INA228 speed: " + speed.sps + " SPS (will apply on Open)");
+		}
+	} finally {
+		select.disabled = false;
+		ina228SpeedChanging = false;
+	}
+}
+
+$("ina228Speed").addEventListener('change', function() {
+	SetINA228Speed(this.value);
+});
+
+function GetGraphDataU() {
+	return graphDataU;
+}
+
+function GetGraphDataI() {
+	return graphDataI;
+}
+
+function CreateRawBuffer(sps, duration, previous) {
+	sps = Math.max(1, Number(sps) || 1);
+	var capacity = Math.max(2, Math.ceil(sps * duration));
+	var buffer = {
+		u: new Float64Array(capacity),
+		i: new Float64Array(capacity),
+		capacity: capacity,
+		start: 0,
+		size: 0,
+		total: 0,
+		sps: sps
+	};
+
+	if(previous != null && previous.sps == sps && previous.size > 0) {
+		var keep = Math.min(previous.size, capacity);
+		var sourceOffset = previous.size - keep;
+		for(var n = 0; n < keep; n++) {
+			var oldIndex = (previous.start + sourceOffset + n) % previous.capacity;
+			buffer.u[n] = previous.u[oldIndex];
+			buffer.i[n] = previous.i[oldIndex];
+		}
+		buffer.size = keep;
+		buffer.total = previous.total;
+	}
+	return buffer;
+}
+
+function ResetRawBuffer() {
+	var sps = (pp.cfg != null && pp.cfg.sps != null) ? pp.cfg.sps : 1;
+	rawBuffer = CreateRawBuffer(sps, rawWindowSec, null);
+	forceRawDecimation = true;
+	rawDecimationRange = null;
+}
+
+function ResizeRawBuffer() {
+	var sps = (rawBuffer != null) ? rawBuffer.sps :
+		((pp.cfg != null && pp.cfg.sps != null) ? pp.cfg.sps : 1);
+	rawBuffer = CreateRawBuffer(sps, rawWindowSec, rawBuffer);
+	requestedTimeWindow = null;
+	userTimeWindow = false;
+	followLeftEdge = false;
+	followRightEdge = false;
+	forceRawDecimation = true;
+	RequestRender();
+}
+
+function AppendRawSample(u, i) {
+	if(rawBuffer == null || rawBuffer.sps != pp.cfg.sps)
+		ResetRawBuffer();
+	var index;
+	if(rawBuffer.size < rawBuffer.capacity) {
+		index = (rawBuffer.start + rawBuffer.size) % rawBuffer.capacity;
+		rawBuffer.size++;
+	} else {
+		index = rawBuffer.start;
+		rawBuffer.start = (rawBuffer.start + 1) % rawBuffer.capacity;
+	}
+	rawBuffer.u[index] = u;
+	rawBuffer.i[index] = i;
+	rawBuffer.total++;
+}
+
+function RawFirstSampleNumber() {
+	return (rawBuffer == null) ? 0 : rawBuffer.total - rawBuffer.size;
+}
+
+function RawSampleTime(position) {
+	return (RawFirstSampleNumber() + position) / rawBuffer.sps;
+}
+
+function RawPhysicalIndex(position) {
+	return (rawBuffer.start + position) % rawBuffer.capacity;
+}
+
+function GetRawBounds() {
+	if(rawBuffer == null || rawBuffer.size < 2)
+		return null;
+	return [RawSampleTime(0), RawSampleTime(rawBuffer.size - 1)];
+}
+
+function PushRawGraphPoint(position, resultU, resultI) {
+	var index = RawPhysicalIndex(position);
+	var time = RawSampleTime(position);
+	var u = rawBuffer.u[index];
+	var i = rawBuffer.i[index];
+	resultU.push([time, [u, u, u]]);
+	resultI.push([time, [i, i, i]]);
+}
+
+function EnsureRawGraphBounds() {
+	if(rawBuffer == null || rawBuffer.size == 0 || graphDataI.length == 0)
+		return;
+	var firstTime = RawSampleTime(0);
+	var lastPosition = rawBuffer.size - 1;
+	var lastTime = RawSampleTime(lastPosition);
+	if(graphDataI[0][0] > firstTime) {
+		var firstIndex = RawPhysicalIndex(0);
+		var firstU = rawBuffer.u[firstIndex];
+		var firstI = rawBuffer.i[firstIndex];
+		graphDataU.unshift([firstTime, [firstU, firstU, firstU]]);
+		graphDataI.unshift([firstTime, [firstI, firstI, firstI]]);
+	}
+	if(graphDataI[graphDataI.length - 1][0] < lastTime)
+		PushRawGraphPoint(lastPosition, graphDataU, graphDataI);
+}
+
+function DecimateRawRange(range, maxPoints) {
+	var resultU = new Array();
+	var resultI = new Array();
+	if(rawBuffer == null || rawBuffer.size == 0)
+		return {u: resultU, i: resultI};
+
+	var firstSample = RawFirstSampleNumber();
+	var first = Math.floor(range[0] * rawBuffer.sps) - firstSample - 1;
+	var last = Math.ceil(range[1] * rawBuffer.sps) - firstSample + 2;
+	first = Math.max(0, Math.min(rawBuffer.size - 1, first));
+	last = Math.max(first + 1, Math.min(rawBuffer.size, last));
+	var count = last - first;
+
+	if(count <= maxPoints) {
+		for(var position = first; position < last; position++)
+			PushRawGraphPoint(position, resultU, resultI);
+		return {u: resultU, i: resultI};
+	}
+
+	// Keep extrema from both channels in every time bucket. This preserves short
+	// current and voltage spikes while limiting the number of points Dygraph draws.
+	var bucketCount = Math.max(1, Math.floor(maxPoints / 4));
+	for(var bucket = 0; bucket < bucketCount; bucket++) {
+		var bucketFirst = first + Math.floor(bucket * count / bucketCount);
+		var bucketLast = first + Math.floor((bucket + 1) * count / bucketCount);
+		if(bucketLast <= bucketFirst)
+			bucketLast = bucketFirst + 1;
+		var minU = bucketFirst, maxU = bucketFirst;
+		var minI = bucketFirst, maxI = bucketFirst;
+		var firstIndex = RawPhysicalIndex(bucketFirst);
+		var minUValue = rawBuffer.u[firstIndex], maxUValue = minUValue;
+		var minIValue = rawBuffer.i[firstIndex], maxIValue = minIValue;
+		for(var position = bucketFirst + 1; position < bucketLast; position++) {
+			var index = RawPhysicalIndex(position);
+			var u = rawBuffer.u[index];
+			var i = rawBuffer.i[index];
+			if(u < minUValue) { minUValue = u; minU = position; }
+			if(u > maxUValue) { maxUValue = u; maxU = position; }
+			if(i < minIValue) { minIValue = i; minI = position; }
+			if(i > maxIValue) { maxIValue = i; maxI = position; }
+		}
+		var selected = [minU, maxU, minI, maxI].sort(function(a, b){return a - b;});
+		var previous = -1;
+		selected.forEach(function(position) {
+			if(position != previous) {
+				PushRawGraphPoint(position, resultU, resultI);
+				previous = position;
+			}
+		});
+	}
+	return {u: resultU, i: resultI};
+}
+
+function LowerBoundByTime(data, time) {
+	var left = 0;
+	var right = data.length;
+	while(left < right) {
+		var middle = (left + right) >> 1;
+		if(data[middle][0] < time)
+			left = middle + 1;
+		else
+			right = middle;
+	}
+	return left;
+}
+
+function UpperBoundByTime(data, time) {
+	var left = 0;
+	var right = data.length;
+	while(left < right) {
+		var middle = (left + right) >> 1;
+		if(data[middle][0] <= time)
+			left = middle + 1;
+		else
+			right = middle;
+	}
+	return left;
+}
+
+function PrepareAveragedGraphData(bounds) {
+	if(datai.length == 0) {
+		graphDataU = new Array();
+		graphDataI = new Array();
+		return;
+	}
+	var first = LowerBoundByTime(datai, bounds[0]);
+	var last = UpperBoundByTime(datai, bounds[1]);
+	var valueAtLeft = Math.max(0, Math.min(datai.length - 1, first > 0 ? first - 1 : first));
+	var valueAtRight = Math.max(0, Math.min(datai.length - 1, last > 0 ? last - 1 : valueAtLeft));
+
+	graphDataU = datau.slice(first, last);
+	graphDataI = datai.slice(first, last);
+	if(graphDataI.length == 0 || graphDataI[0][0] > bounds[0]) {
+		graphDataU.unshift([bounds[0], datau[valueAtLeft][1]]);
+		graphDataI.unshift([bounds[0], datai[valueAtLeft][1]]);
+	}
+	if(graphDataI[graphDataI.length - 1][0] < bounds[1]) {
+		graphDataU.push([bounds[1], datau[valueAtRight][1]]);
+		graphDataI.push([bounds[1], datai[valueAtRight][1]]);
+	}
+}
+
+function PrepareGraphData(range) {
+	if(rawMode) {
+		var now = Date.now();
+		var visibleSamples = Math.max(0, Math.ceil((range[1] - range[0]) * rawBuffer.sps));
+		var minimumInterval = visibleSamples > 2000000 ? 1000 :
+			(visibleSamples > 500000 ? 500 : (visibleSamples > 100000 ? 250 : 100));
+		var sameRange = rawDecimationRange != null &&
+			Math.abs(rawDecimationRange[0] - range[0]) <= 1 / rawBuffer.sps &&
+			Math.abs(rawDecimationRange[1] - range[1]) <= 1 / rawBuffer.sps;
+		if(!forceRawDecimation && graphDataI.length > 1) {
+			// A fixed historical window cannot receive new samples, so its cached
+			// decimation remains valid until the user changes the view.
+			if(userTimeWindow && !followLeftEdge && !followRightEdge && sameRange)
+				return false;
+			if(now - rawDecimationTime < minimumInterval)
+				return false;
+		}
+		var decimated = DecimateRawRange(range, RAW_DRAW_POINTS_MAX);
+		graphDataU = decimated.u;
+		graphDataI = decimated.i;
+		EnsureRawGraphBounds();
+		rawDecimationRange = [range[0], range[1]];
+		rawDecimationTime = now;
+		forceRawDecimation = false;
+		return true;
+	} else {
+		PrepareAveragedGraphData(GetCurrentDataBounds());
+		return true;
+	}
+}
+
+function UpdateRawStats() {
+	if(rawBuffer == null || rawBuffer.size == 0) {
+		$("rawStats").textContent = "";
+		return;
+	}
+	$("rawStats").textContent = "(" + rawBuffer.size.toLocaleString() + " samples)";
+}
+
+function RequestRender() {
+	if(renderRequested)
+		return;
+	renderRequested = true;
+	setTimeout(function() {
+		renderRequested = false;
+		RendChart();
+	}, 0);
+}
+
+function DisplayTimeWindowImmediately(range) {
+	pendingDisplayWindow = [range[0], range[1]];
+	if(pendingWindowFrame != null)
+		return;
+	var scheduleFrame = window.requestAnimationFrame || function(callback) {
+		return setTimeout(callback, 16);
+	};
+	pendingWindowFrame = scheduleFrame(function() {
+		pendingWindowFrame = null;
+		if(pendingDisplayWindow == null)
+			return;
+		var displayWindow = pendingDisplayWindow;
+		pendingDisplayWindow = null;
+		gui.updateOptions({'dateWindow': displayWindow});
+		guu.updateOptions({'dateWindow': displayWindow});
+		if(gdio != null)
+			gdio.updateOptions({'dateWindow': displayWindow});
+		$('wdsize').innerHTML=(displayWindow[1]-displayWindow[0]).toFixed(3);
+	});
+}
+
+function RequestWheelDecimation() {
+	if(wheelDecimationTimer != null)
+		clearTimeout(wheelDecimationTimer);
+	wheelDecimationTimer = setTimeout(function() {
+		wheelDecimationTimer = null;
+		forceRawDecimation = true;
+		RendChart();
+	}, 140);
+}
+
+function SetRawMode(value) {
+	if(rawMode == value)
+		return;
+	rawMode = value;
+	forceRawDecimation = true;
+	if(gui != null)
+		RendChart();
+}
+
+$("rawDataMode").addEventListener('change', function() {
+	SetRawMode(this.checked);
+});
+
+$("rawWindowSec").addEventListener('change', function() {
+	rawWindowSec = Number(this.value) || 60;
+	ResizeRawBuffer();
+});
+
+async function CmdDecode(value) {
+	await pp.CmdDecode(value);
+}
+
+butstop.addEventListener('pointerdown', () => {
+	UpdateIntervalGRF(butstop.value == 'Start');
+});
+
+
+butconnect.addEventListener('pointerdown', () => {
+	if(butconnect.value == 'Close') {
+		pp.Close();
+		//butconnect.value = 'Open';
+	} else {
+		pp.Open(CmdDecode);
+	}
+});
+
+butclear.addEventListener('pointerdown', () => {
+	ClearData();
+});
+
+function SetAverage(x) {
+	average = x;
+}
+
+function ClearData() {
+	cur_idx = -1;
+	adc_cnt = 0;
+	dio_last = 0;
+	dio_sample_count = 0;
+	userTimeWindow = false;
+	followLeftEdge = false;
+	followRightEdge = false;
+	requestedTimeWindow = null;
+	datau = new Array();
+	datai = new Array();
+	ResetRawBuffer();
+	dataDio = new Array();
+	datau.push([0, [0,0,0]]);
+	datau.push([1, [0,195.3125,195.3125]]);
+	datau.push([2, [0,28333.333,28333.333]]);
+	datau.push([3, [0,56666.666,56666.666]]);
+	datau.push([4, [0,85000,85000]]);
+	datai.push([0, [-16.384,-16.384,0]]);
+	datai.push([1, [-0.00003125,-0.00003125,0]]);
+	datai.push([2, [0,0,0]]);
+	datai.push([3, [0,0.00003125,0.00003125]]);
+	datai.push([4, [0,16.384,16.384]]);
+	dataDio.push(DioGraphRow(0, 0));
+	UpdateDioDisplay(0);
+	UpdateIntervalGRF(false);
+}
+
+function DioGraphRow(t, mask) {
+	var row = [t];
+	for(var bit = 0; bit < 8; bit++)
+		row.push((mask & (1 << bit)) ? bit + 0.85 : bit + 0.15);
+	return row;
+}
+
+function UpdateDioDisplay(mask) {
+	$("dioMask").innerHTML = "mask: 0x" + hex(mask, 2);
+	var html = "";
+	for(var bit = 0; bit < 8; bit++) {
+		var on = (mask & (1 << bit)) != 0;
+		html += '<span style="display:inline-block; min-width:68px; color:' +
+			(on ? 'Lime' : 'Gray') + ';">DIO' + bit + '=' + (on ? '1' : '0') + '</span>';
+	}
+	$("dioStatus").innerHTML = html;
+}
+
+function TrimDioData(minTime) {
+	if(dataDio.length == 0)
+		return;
+	var remove = 0;
+	while(remove + 1 < dataDio.length && dataDio[remove + 1][0] < minTime)
+		remove++;
+	if(remove > 0)
+		dataDio.splice(0, remove);
+	if(dataDio.length > 0 && dataDio[0][0] < minTime)
+		dataDio[0][0] = minTime;
+}
+
+function GetCurrentDataBounds() {
+	// Use one common time axis for raw and averaged views. The raw ring buffer
+	// receives every sample and therefore defines the exact shared interval.
+	var rawBounds = GetRawBounds();
+	if(rawBounds != null)
+		return rawBounds;
+	if(datai.length < 2)
+		return null;
+	var end = datai[datai.length - 1][0];
+	return [Math.max(datai[0][0], end - rawWindowSec), end];
+}
+
+function EdgeTolerance(left, right) {
+	var sampleTolerance = rawMode && rawBuffer != null ? 2 / rawBuffer.sps : 0.001;
+	return Math.max((right - left) * 0.001, sampleTolerance, 0.001);
+}
+
+function IsAtLeftEdge(left, right) {
+	var bounds = GetCurrentDataBounds();
+	return bounds != null && left <= bounds[0] + EdgeTolerance(left, right);
+}
+
+function IsAtRightEdge(right, left) {
+	var bounds = GetCurrentDataBounds();
+	return bounds != null && right >= bounds[1] - EdgeTolerance(left, right);
+}
+
+function UpdateEdgeFollowing(left, right) {
+	followLeftEdge = IsAtLeftEdge(left, right);
+	followRightEdge = IsAtRightEdge(right, left);
+}
+
+function OnUserZoom(min, max) {
+	userTimeWindow = true;
+	requestedTimeWindow = [min, max];
+	UpdateEdgeFollowing(min, max);
+	forceRawDecimation = true;
+	RequestRender();
+}
+
+function UpdateIntervalGRF(on = true) {
+	if(rend_timer != null)
+		clearInterval(rend_timer);
+	if(on == true && gui != null && pp.dev.adc_wrk == true && cur_idx > 1) {
+		let tt = 1000/RENDER_FPS; // ms
+		if(pp.cfg.sps != null) {
+			tt = 1000*RENDER_FPS/pp.cfg.sps;
+			if(tt < 1000/RENDER_FPS)
+			 tt = 1000/RENDER_FPS;
+		}
+		rend_timer = setInterval(function(){RendChart()}, tt);
+		butstop.value = 'Stop';
+	} else {
+		rend_timer = null;
+		if(gui != null)
+			RendChart();
+		butstop.value = 'Start';
+	}
+}
+
+var sumu, sumi;
+var smaxu, smaxi;
+var sminu, smini;
+var adc_cnt;
+function AddData2Grf(du, di, dio) {
+	if(cur_idx < 0) {
+		datau = new Array();
+		datai = new Array();
+		ResetRawBuffer();
+		dataDio = new Array();
+		dio_last = 0;
+		dio_sample_count = 0;
+		userTimeWindow = false;
+		followLeftEdge = false;
+		followRightEdge = false;
+		requestedTimeWindow = null;
+		var rawU = du*pp.cfg.kBus+pp.cfg.zBus;
+		var rawI = di*pp.cfg.kShunt+pp.cfg.zShunt;
+		AppendRawSample(rawU, rawI);
+		if(dio !== undefined) {
+			dio_last = dio;
+			dio_sample_count = 1;
+			dataDio.push(DioGraphRow(0, dio));
+			UpdateDioDisplay(dio);
+		} else {
+			dataDio.push(DioGraphRow(0, 0));
+		}
+		cur_idx = 0;
+		adc_cnt = 0;
+		sumu = 0;
+		smaxu = -0xffffffff;
+		sminu = 0xffffffff;
+		sumi = 0;
+		smaxi = -0xffffffff;
+		smini = 0xffffffff;
+		return;
+	}
+	var rawU = du*pp.cfg.kBus+pp.cfg.zBus;
+	var rawI = di*pp.cfg.kShunt+pp.cfg.zShunt;
+	AppendRawSample(rawU, rawI);
+	if(dio !== undefined) {
+		var dioTime = dio_sample_count / pp.cfg.sps;
+		if(dio != dio_last) {
+			dataDio.push(DioGraphRow(dioTime, dio));
+			UpdateDioDisplay(dio);
+		}
+		dio_last = dio;
+		dio_sample_count++;
+	}
+	if(adc_cnt > pp.cfg.sps/10) {
+		var sampleTime = (dio_sample_count > 0) ?
+			(dio_sample_count - 1)/pp.cfg.sps : adc_cnt*cur_idx/pp.cfg.sps;
+		datau.push([sampleTime, [sminu*pp.cfg.kBus+pp.cfg.zBus, sumu*pp.cfg.kBus/adc_cnt+pp.cfg.zBus, smaxu*pp.cfg.kBus+pp.cfg.zBus]]);
+		datai.push([sampleTime, [smini*pp.cfg.kShunt+pp.cfg.zShunt, sumi*pp.cfg.kShunt/adc_cnt+pp.cfg.zShunt, smaxi*pp.cfg.kShunt+pp.cfg.zShunt]]);
+		dataDio.push(DioGraphRow(sampleTime, dio_last));
+		cur_idx++;
+		if(cur_idx == 2) {
+			UpdateIntervalGRF();
+		} else 	if(cur_idx >= samples) {
+			datau.shift();
+			datai.shift();
+			TrimDioData(datai[0][0]);
+		}
+		sumu = du;
+		smaxu = du;
+		sminu = du;
+		sumi = di;
+		smaxi = di;
+		smini = di;
+		adc_cnt = 1;
+	} else {
+		sumu += du;
+		if(smaxu < du) smaxu = du;
+		if(sminu > du) sminu = du;
+		sumi += di;
+		if(smaxi < di) smaxi = di;
+		if(smini > di) smini = di;
+		adc_cnt++;
+	}
+}
+
+function formatU_mV(xu) {
+	var s;
+	var mx = Math.abs(xu);
+	if(mx < 1.0)
+		s = (xu*1000.0).toFixed(1)+" nV";
+	else if(mx < 1000.0)
+		s = xu.toFixed(3)+" mV";
+	else
+		s = (xu/1000.0).toFixed(6)+" V";
+	return s;
+}	
+function formatI_mA(xi) {
+	var s;
+	var mx = Math.abs(xi);
+	if(mx < 0.001)
+		s = (xi*1000000.0).toFixed(1)+" nA";
+	else if(mx < 1.0)
+		s = (xi*1000.0).toFixed(3)+" uA";
+	else
+		s = xi.toFixed(6)+" mA";
+	return s;
+}
+function formatW_uW(xw) {
+	var s;
+	var mx = Math.abs(xw)
+	if(mx < 1.0)
+		s = (xw*1000.0).toFixed(1)+" nW";
+	else if(mx < 1000.0)
+		s = xw.toFixed(3)+" uW";
+	else if(mx < 1000000.0)
+		s = (xw/1000.0).toFixed(6)+" mW";
+	else
+		s = (xw/1000000.0).toFixed(6)+" W";
+	return s;
+}
+function formatR(xu, xi) {
+	var s = ">100 MOhm";
+	if (xi != 0)
+	var xr = xu/xi;
+	var mx = Math.abs(xr);
+	if(mx < 1000.0)
+		s = xr.toFixed(3)+" Ohm";
+	else if(mx < 1000000.0)
+		s = (xr/1000.0).toFixed(6)+" kOhm";
+	else if(mx < 100000000.0)
+		s = (xr/1000000.0).toFixed(3)+" MOhm";
+	return s;
+}
+
+function FinishGraphPan(graph) {
+	var bounds = GetCurrentDataBounds();
+	if(bounds == null)
+		return;
+	var range = graph.xAxisRange();
+	var clamped = ClampTimeWindow([range[0], range[1]], bounds);
+	userTimeWindow = true;
+	requestedTimeWindow = clamped;
+	UpdateEdgeFollowing(clamped[0], clamped[1]);
+	DisplayTimeWindowImmediately(clamped);
+	RequestWheelDecimation();
+}
+
+var panInteractionModel = {
+	mousedown: function(event, graph, context) {
+		if(event.button !== undefined && event.button !== 0)
+			return;
+		event.preventDefault();
+		context.initializeMouseDown(event, graph, context);
+		Dygraph.startPan(event, graph, context);
+
+		var mousemove = function(moveEvent) {
+			if(context.isPanning)
+				Dygraph.movePan(moveEvent, graph, context);
+		};
+		var mouseup = function(upEvent) {
+			if(context.isPanning)
+				Dygraph.endPan(upEvent, graph, context);
+			document.removeEventListener('mousemove', mousemove);
+			document.removeEventListener('mouseup', mouseup);
+			context.destroy();
+			FinishGraphPan(graph);
+		};
+
+		document.addEventListener('mousemove', mousemove);
+		document.addEventListener('mouseup', mouseup);
+	},
+	willDestroyContextMyself: true
+};
+
+function ShowGrf() {
+	if(guu == null) {
+		ClearData();
+		guu = new Dygraph(
+			$("div_g1"),
+		    datau,
+			{
+				interactionModel: panInteractionModel,
+				customBars: true,
+				showRangeSelector: false,
+				showRoller: true,
+				rollPeriod: rollpu,
+//				xlabel: 'T(sec)',
+//				ylabel: 'U(mV)',
+				colors: ['Yellow' , 'LightSkyBlue' ],
+				axes: { x: {valueFormatter: function(x){return this.getLabels()[0] + ': '+ x.toPrecision(6);}},
+						y: {valueFormatter: function(y){return formatU_mV(y);}}},
+				labels: ['T', 'U'],
+				labelsDiv: $('labdiv1'),
+				legend: 'always',  // "follow"
+				zoomCallback: OnUserZoom,
+				digitsAfterDecimal: 6,
+//                strokeWidth: 2,
+//				errorBars: true,
+			});
+		gui = new Dygraph(
+			$("div_g2"),
+		    datai,
+			{
+				interactionModel: panInteractionModel,
+				showRoller: true,
+				rollPeriod: rollpi,
+				xlabel: 'T(sec)',
+//				ylabel: 'I(mA)',
+				colors: ['SpringGreen', 'LightPink'],
+				axes: { x: {valueFormatter: function(x){return this.getLabels()[0] + ': '+ x.toPrecision(6);}},
+						y: {valueFormatter: function(y){return formatI_mA(y);}}},
+				labels: ['T', 'I'],
+				labelsDiv: $('labdiv2'),
+				legend: 'always',  // "follow"
+				zoomCallback: OnUserZoom,
+				digitsAfterDecimal: 6,
+				showRangeSelector: true,
+              	rangeSelectorPlotFillColor: 'MediumSlateBlue',
+              	rangeSelectorPlotFillGradientColor: 'rgba(123, 104, 238, 0)',
+                colorValue: 0.9,
+                fillAlpha: 0.4,
+//                strokeWidth: 2,
+//                visibility: [true, false],
+				customBars: true,
+//				errorBars: true
+			});
+			gdio = new Dygraph(
+				$("div_g3"),
+				dataDio,
+				{
+					interactionModel: panInteractionModel,
+					labels: ['T', 'DIO0', 'DIO1', 'DIO2', 'DIO3', 'DIO4', 'DIO5', 'DIO6', 'DIO7'],
+					colors: ['#00FFFF', '#FFB000', '#00FF66', '#FF66CC', '#66AAFF', '#FFFF66', '#CC99FF', '#FF9966'],
+					legend: 'never',
+					zoomCallback: OnUserZoom,
+					stepPlot: true,
+					strokeWidth: 2,
+					valueRange: [-0.1, 8.1],
+					showRangeSelector: false,
+					axes: {
+						x: {valueFormatter: function(x){return this.getLabels()[0] + ': '+ x.toPrecision(6);}},
+						y: {axisLabelFormatter: function(y){
+							var n = Math.round(y);
+							return (n >= 0 && n < 8) ? 'DIO' + n : '';
+						}}
+					}
+				}
+			);
+			var sync = Dygraph.synchronize(guu, gui, gdio, {
+				zoom: true,
+				selection: true,
+				range: false
+			});
+			InstallWheelZoom();
+//      $('#chk-zoom, #chk-selection').change(update);
+
+	}
+}
+
+function InstallWheelZoom() {
+	var graphs = [guu, gui, gdio];
+	var containers = [$("div_g1"), $("div_g2"), $("div_g3")];
+	containers.forEach(function(container, index) {
+		container.addEventListener('wheel', function(event) {
+			var graph = graphs[index];
+			if(graph == null || event.deltaY == 0)
+				return;
+			event.preventDefault();
+
+			var range = (userTimeWindow && requestedTimeWindow != null) ?
+				[requestedTimeWindow[0], requestedTimeWindow[1]] : graph.xAxisRange();
+			var span = range[1] - range[0];
+			if(span <= 0)
+				return;
+			var rect = container.getBoundingClientRect();
+			var cursorX = event.clientX - rect.left;
+			var cursor = graph.toDataXCoord(cursorX);
+			var zoom = event.deltaY < 0 ? 0.8 : 1.25;
+			var left = cursor - (cursor - range[0]) * zoom;
+			var right = cursor + (range[1] - cursor) * zoom;
+			var bounds = GetCurrentDataBounds();
+			if(bounds == null)
+				return;
+			var minimumSpan = rawMode && rawBuffer != null ? 2 / rawBuffer.sps : 0.001;
+			if(right - left < minimumSpan) {
+				left = cursor - minimumSpan / 2;
+				right = cursor + minimumSpan / 2;
+			}
+			if(right - left >= bounds[1] - bounds[0]) {
+				left = bounds[0];
+				right = bounds[1];
+			} else {
+				if(left < bounds[0]) {
+					right += bounds[0] - left;
+					left = bounds[0];
+				}
+				if(right > bounds[1]) {
+					left -= right - bounds[1];
+					right = bounds[1];
+				}
+			}
+			userTimeWindow = true;
+			requestedTimeWindow = [left, right];
+			UpdateEdgeFollowing(left, right);
+			DisplayTimeWindowImmediately(requestedTimeWindow);
+			RequestWheelDecimation();
+		}, {passive: false});
+		container.addEventListener('dblclick', function() {
+			setTimeout(function() {
+				userTimeWindow = false;
+				followLeftEdge = false;
+				followRightEdge = false;
+				requestedTimeWindow = null;
+				forceRawDecimation = true;
+				RendChart();
+			}, 0);
+		});
+		container.addEventListener('mouseup', function() {
+			var graph = graphs[index];
+			if(graph == null)
+				return;
+			setTimeout(function() {
+				var range = graph.xAxisRange();
+				userTimeWindow = true;
+				requestedTimeWindow = [range[0], range[1]];
+				UpdateEdgeFollowing(range[0], range[1]);
+				RequestWheelDecimation();
+			}, 0);
+		});
+	});
+}
+function avg(arr) {
+	var arrLen = arr.length, result = 0;
+	for (var i = 0; i < arrLen; i++) result += arr[i];
+	return result / arrLen;
+}
+
+function ClampTimeWindow(windowRange, bounds) {
+	var available = bounds[1] - bounds[0];
+	var span = windowRange[1] - windowRange[0];
+	if(span <= 0 || span >= available)
+		return [bounds[0], bounds[1]];
+	var left = windowRange[0];
+	var right = windowRange[1];
+	if(left < bounds[0]) {
+		right += bounds[0] - left;
+		left = bounds[0];
+	}
+	if(right > bounds[1]) {
+		left -= right - bounds[1];
+		right = bounds[1];
+	}
+	return [left, right];
+}
+
+function RendChart(){
+	var bounds = GetCurrentDataBounds();
+	if(bounds == null)
+		return;
+	var timeWindow;
+	if(!userTimeWindow || requestedTimeWindow == null) {
+		timeWindow = [bounds[0], bounds[1]];
+	} else {
+		var left = followLeftEdge ? bounds[0] :
+			Math.max(bounds[0], requestedTimeWindow[0]);
+		var right = followRightEdge ? bounds[1] :
+			Math.min(bounds[1], requestedTimeWindow[1]);
+		if(right <= left)
+			timeWindow = [bounds[0], bounds[1]];
+		else
+			timeWindow = [left, right];
+		requestedTimeWindow = [timeWindow[0], timeWindow[1]];
+	}
+
+	var dataWindow = timeWindow;
+	if(rawMode && userTimeWindow) {
+		// Keep one extra viewport on each side. Wheel zoom can then update the
+		// axes immediately using already prepared points while detailed data is
+		// rebuilt after scrolling stops.
+		var margin = timeWindow[1] - timeWindow[0];
+		dataWindow = ClampTimeWindow(
+			[timeWindow[0] - margin, timeWindow[1] + margin], bounds);
+	}
+	var graphDataChanged = PrepareGraphData(dataWindow);
+	var graphU = GetGraphDataU();
+	var graphI = GetGraphDataI();
+	if(graphI.length < 2)
+		return;
+	$('wdsize').innerHTML=(timeWindow[1]-timeWindow[0]).toFixed(3);
+	UpdateRawStats();
+
+	var len = datai.length - average;
+	if(len < 0)	len = 0;
+	// mA  data = guu.rawData_.slice(len);
+	var data = datai.slice(len);
+	var sum = data.map(function(e){return e[1][1]})
+             .reduce(function(a,b){return a+b});
+	var xi = sum/data.length;
+	$("ts1").innerHTML = formatI_mA(xi);
+	// mV
+	data = datau.slice(len);
+	sum = data.map(function(e){return e[1][1]})
+             .reduce(function(a,b){return a+b});
+	var xu = sum/data.length;
+	$("ts2").innerHTML = formatU_mV(xu);
+	// uW
+	$("ts3").innerHTML = formatW_uW(xu*xi); // mA * mV -> uW
+	// R
+	$("ts4").innerHTML = formatR(xu, xi); // Ohm
+
+	if(rawMode && !graphDataChanged)
+		return;
+	gui.updateOptions({'file': graphI, 'dateWindow': timeWindow});
+	guu.updateOptions({'file': graphU, 'dateWindow': timeWindow});
+	if(gdio != null)
+		gdio.updateOptions({'file': dataDio, 'dateWindow': timeWindow});
+}
+
+function convertArrayOfObjectsToCSV(value){
+	var result, ctr, keysu, keysi, columnDelimiter, lineDelimiter, datau, datai;
+	datau = value.datau || null;
+	datai = value.datai || null;
+	if (datau == null || !datau.length) {return null;}
+	if (datai == null || !datai.length) {return null;}
+	columnDelimiter = value.columnDelimiter || ';';
+	lineDelimiter = value.lineDelimiter || '\n';
+	result = '';
+	keysu = Object.keys(datau[1]);
+	keysi = Object.keys(datai[1]);
+	result += keysu.join(columnDelimiter);
+	result += keysi.join(columnDelimiter);
+	result += lineDelimiter;
+	datau.forEach(function(item, idx){
+		ctr = 0;
+		keysu.forEach(function(key){
+			if (ctr > 0)
+				result += columnDelimiter;
+			result += item[key];
+			ctr++;
+		});
+		keysi.forEach(function(k){
+			result += columnDelimiter;
+			result += datai[idx][k];
+		});
+		result += lineDelimiter;
+	});
+	return result;
+}
+$("butSave").onclick =  function() {
+	var csv = convertArrayOfObjectsToCSV({datau: datau, datai: datai});
+	if (!csv.match(/^data:text\/csv/i)) {csv = 'data:text/csv;charset=utf-8,' + csv;}
+	var encodedUri = encodeURI(csv);
+	var link = document.createElement('a');
+	link.setAttribute('href', encodedUri);
+	link.setAttribute('download',"data.csv");
+	link.click();
+}
+function resizeApp() {
+	if(window.innerHeight > 320) {
+		// Share the available height between U, I and DIO graphs: 2:3:2.
+		let available = window.innerHeight - 285;
+		if(available < 280)
+			available = 280;
+		let x = available/7;
+		$("div_g1").style.height = (x*2) + "px";
+		$("div_g2").style.height = (x*3) + "px";
+		$("div_g3").style.height = (x*2) + "px";
+	//$("div_v").style.width = (window.innerWidth-50) + "px";
+	}
+}
+resizeApp();
+window.onresize = function(){resizeApp();};
+ShowGrf();
+</script>
+</html>

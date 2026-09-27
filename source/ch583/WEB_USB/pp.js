@@ -18,8 +18,8 @@ const INA226zShunt = 0.0078;
 const INA226kBus = 1.25;
 const INA226zBus = 0; //-0.00365901;
 // INA228 settings:
-const INA228_MTID = 3;		//Measure time interval (idx): 1,  2,   3,   4,   5,    6,    7
-const INA228_MTIU = 280;    //Measure time interval (us): 84, 150, 280, 540, 1052, 2074, 4120 us
+const INA228_MTID = 1;		// Measure time interval index: 1 = 84 us
+const INA228_MTIU = 84;     // Measure time interval (us)
 const INA228rShunt = 10.0; // Shunt 10.0 Om
 const INA228kShunt = 0.0000019613524; // Shunt 10.0 Om: 0.000001953125  // max R 100MOm
 const INA228zShunt = 0.000004;
@@ -79,7 +79,7 @@ var config_ina228 = {
 	init: [ [INA_I2C_ADDR, 0x0, 0xC000], // System Reset sets registers to default values
 			[INA_I2C_ADDR, 0x0b, 0x4000], // Alert pin to be asserted when the Conversion Ready
 			[INA_I2C_ADDR, 0x0, 0x0 ],  // Shunt full scale range +-163.84 mV 
-			[INA_I2C_ADDR, 0x01, 0xB000 | (INA228_MTID<<3)|(INA228_MTID<<6)|(INA228_MTID<<9)] ], // Continuous Shunt + Vbus, 540 us : 1851 sps,  
+			[INA_I2C_ADDR, 0x01, 0xB000 | (INA228_MTID<<3)|(INA228_MTID<<6)|(INA228_MTID<<9)] ], // Continuous Shunt + Vbus, 84 us per channel
 	rd: [ [INA_I2C_ADDR, 0x05], [INA_I2C_ADDR, 0x04], [0, 0], [0, 0] ],
 	slp: [ [INA_I2C_ADDR, 0x01, 0x0], [0, 0, 0] ],
 	rShunt: INA228rShunt,
@@ -322,13 +322,24 @@ class  PPdev {
 					}
 				} else if (blkid == 0x3A) { // i2c 24bit  data
 					if (typeof this.new_adc_cb == 'function') {
-						if(this.cfg.chnls == 2) {
+					if(this.cfg.chnls == 2) {
+							/* INA228 packet: 24-bit voltage, 24-bit current, DIO mask. */
+							if(this.cfg.name == "INA228") {
+								for (var i=0; i<blksz; i+=7) {
+									let du = this.blk[i+2] | (this.blk[i+3]<<8) | (this.blk[i+4]<<16);
+									let di = this.blk[i+5] | (this.blk[i+6]<<8) | (this.blk[i+7]<<16);
+									if(di >= 0x800000)
+										di -= 0x1000000;
+									this.new_adc_cb(du, di, this.blk[i+8]);
+								}
+							} else {
 							for (var i=0; i<blksz; i+=6) {
 								let du = this.blk[i+2] | (this.blk[i+3]<<8) | (this.blk[i+4]<<16);
 								let di = this.blk[i+5] | (this.blk[i+6]<<8) | (this.blk[i+7]<<16);
 								if(di >= 0x800000)
 									di -= 0x1000000;
 								this.new_adc_cb(du, di);
+							}
 							}
 						} else {
 							for (var i=0; i<blksz; i+=3) {

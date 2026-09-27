@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>INA228 Power Profiler — UART overlay demo</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111821;
+      --panel-2: #151f2a;
+      --border: #263342;
+      --muted: #8493a5;
+      --text: #e8eef6;
+      --cyan: #64d8ff;
+      --green: #76e39c;
+      --yellow: #f6d365;
+      --purple: #b894ff;
+      --orange: #ffad5c;
+      --red: #ff7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 30% -20%, #1a2c40 0, var(--bg) 42%);
+      color: var(--text);
+      font: 14px/1.4 Inter, Segoe UI, Arial, sans-serif;
+    }
+    .app { max-width: 1500px; margin: 0 auto; padding: 18px; }
+    .topbar, .card {
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 12px 35px #0005;
+    }
+    .topbar {
+      display: flex; align-items: center; gap: 16px; padding: 14px 16px;
+      margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .brand { font-size: 18px; font-weight: 700; margin-right: auto; }
+    .brand small { color: var(--muted); font-size: 12px; font-weight: 400; }
+    button, select {
+      color: var(--text); background: #1d2b3a; border: 1px solid #38516a;
+      border-radius: 7px; padding: 8px 12px; cursor: pointer;
+    }
+    button:hover { background: #263c51; }
+    button.primary { background: #166b88; border-color: #2ca9d0; }
+    button.active { background: #574182; border-color: var(--purple); }
+    .status { color: var(--green); white-space: nowrap; }
+    .status::before { content: ""; display: inline-block; width: 8px; height: 8px; background: var(--green); border-radius: 50%; margin-right: 7px; box-shadow: 0 0 10px var(--green); }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .metric { padding: 12px 15px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; }
+    .metric label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+    .metric strong { font-size: 21px; }
+    .metric.current strong { color: var(--green); }
+    .metric.voltage strong { color: var(--yellow); }
+    .metric.power strong { color: var(--cyan); }
+    .metric.rate strong { color: var(--purple); }
+    .main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
+    .card { padding: 14px; }
+    .card-title { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .card-title h2 { font-size: 15px; margin: 0; }
+    .card-title span { color: var(--muted); font-size: 12px; margin-left: auto; }
+    .chart-wrap { position: relative; background: #0c1219; border: 1px solid #22303e; border-radius: 8px; overflow: hidden; }
+    canvas { display: block; width: 100%; }
+    #analog { height: 340px; }
+    #digital { height: 190px; }
+    .chart-caption { display: flex; gap: 17px; color: var(--muted); font-size: 12px; margin-top: 8px; flex-wrap: wrap; }
+    .legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+    .uart-panel { position: sticky; top: 12px; }
+    .selected-event {
+      background: linear-gradient(135deg, #31243b, #192633);
+      border: 1px solid #795ca5; border-radius: 9px; padding: 12px; margin-bottom: 12px;
+    }
+    .selected-event .eyebrow { color: var(--purple); text-transform: uppercase; letter-spacing: .08em; font-size: 10px; }
+    .selected-event .message { color: #fff0d7; font-size: 15px; margin: 5px 0 8px; word-break: break-word; }
+    .mono { font-family: Consolas, "Cascadia Code", monospace; }
+    .bytes { color: var(--orange); font-size: 12px; word-break: break-all; }
+    .event-list { max-height: 470px; overflow: auto; }
+    .event {
+      display: grid; grid-template-columns: 50px 43px 1fr; gap: 7px; align-items: start;
+      padding: 9px 6px; border-bottom: 1px solid #22303e; cursor: pointer;
+    }
+    .event:hover, .event.selected { background: #1c2a37; }
+    .event .time { color: var(--muted); }
+    .dir { font-size: 11px; border-radius: 4px; padding: 2px 5px; text-align: center; font-weight: 700; }
+    .dir.rx { color: #08120c; background: var(--green); }
+    .dir.tx { color: #160e05; background: var(--orange); }
+    .event .preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .event .preview small { display: block; color: var(--muted); margin-top: 2px; }
+    .hint { color: var(--muted); font-size: 12px; margin: 9px 0 0; }
+    .bottom { margin-top: 14px; }
+    .timeline { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+    .timeline-line { height: 7px; border-radius: 4px; background: linear-gradient(90deg, #214b5c, #372e55); flex: 1; position: relative; }
+    .timeline-line i { position: absolute; top: -4px; width: 2px; height: 15px; background: var(--orange); cursor: pointer; }
+    .timeline-line i.rx { background: var(--green); }
+    .timeline-line i.selected { width: 4px; box-shadow: 0 0 8px currentColor; }
+    .footer-note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+    @media (max-width: 950px) {
+      .main { grid-template-columns: 1fr; }
+      .uart-panel { position: static; }
+    }
+    @media (max-width: 600px) {
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .app { padding: 9px; }
+    }
+  </style>
+</head>
+<body>
+<main class="app">
+  <section class="topbar">
+    <div class="brand">INA228 Power Profiler <small>demo interface · UART overlay</small></div>
+    <span class="status">Demo stream connected</span>
+    <button id="run" class="primary">Pause</button>
+    <button id="labels">UART labels: on</button>
+    <select id="window"><option value="10">Window 10 s</option><option value="5">Window 5 s</option></select>
+  </section>
+
+  <section class="metrics">
+    <div class="metric current"><label>Current</label><strong id="mI">—</strong></div>
+    <div class="metric voltage"><label>Voltage</label><strong id="mU">—</strong></div>
+    <div class="metric power"><label>Power</label><strong id="mP">—</strong></div>
+    <div class="metric rate"><label>Analog / digital</label><strong>1.79 / 1.79 kS/s</strong></div>
+  </section>
+
+  <section class="main">
+    <div>
+      <section class="card">
+        <div class="card-title"><h2>INA228 analog signals</h2><span>shared time axis · UART markers are aligned to samples</span></div>
+        <div class="chart-wrap"><canvas id="analog"></canvas></div>
+        <div class="chart-caption">
+          <span><i class="legend-dot" style="background:var(--yellow)"></i>Voltage</span>
+          <span><i class="legend-dot" style="background:var(--green)"></i>Current</span>
+          <span><i class="legend-dot" style="background:var(--orange)"></i>TX</span>
+          <span><i class="legend-dot" style="background:var(--green)"></i>RX</span>
+          <span>Click a vertical marker or UART row to inspect the packet</span>
+        </div>
+      </section>
+
+      <section class="card" style="margin-top:14px">
+        <div class="card-title"><h2>Discrete inputs</h2><span>one byte bit mask · 8 inputs</span></div>
+        <div class="chart-wrap"><canvas id="digital"></canvas></div>
+        <div class="chart-caption"><span>DI0…DI7 are shown as step signals. UART markers use the same x-coordinate.</span></div>
+      </section>
+
+      <section class="card bottom">
+        <div class="card-title"><h2>Event timeline</h2><span>0…10 s</span></div>
+        <div class="timeline"><span>0 s</span><div class="timeline-line" id="timeline"></div><span>10 s</span></div>
+        <div class="footer-note">Long UART messages remain in the event panel; only a compact marker/label is drawn over the signal.</div>
+      </section>
+    </div>
+
+    <aside class="card uart-panel">
+      <div class="card-title"><h2>UART overlay</h2><span>UART1 · 115200 8N1</span></div>
+      <div class="selected-event" id="selected">
+        <div class="eyebrow">Select a marker</div>
+        <div class="message">UART message details appear here</div>
+        <div class="bytes mono">—</div>
+      </div>
+      <div class="event-list" id="events"></div>
+      <p class="hint">RX/TX direction, timestamp, decoded text and raw bytes are kept together. Non-printable bytes stay visible in hex.</p>
+    </aside>
+  </section>
+</main>
+
+<script>
+  "use strict";
+  const palette = { grid: "#20303e", axis: "#718196", text: "#dce7f3", u: "#f6d365", i: "#76e39c", marker: "#ffad5c", rx: "#76e39c", tx: "#ffad5c" };
+  const analog = document.getElementById("analog");
+  const digital = document.getElementById("digital");
+  const ctxU = analog.getContext("2d");
+  const ctxD = digital.getContext("2d");
+  const T = 10, N = 500;
+  let running = true, showLabels = true, selected = 2, phase = 0;
+  const events = [
+    {t: 1.15, dir: "RX", text: "BOOT OK", bytes: "42 4F 4F 54 20 4F 4B 0D 0A"},
+    {t: 2.35, dir: "TX", text: "SET LOAD 250mA", bytes: "53 45 54 20 4C 4F 41 44 20 32 35 30 6D 41 0D"},
+    {t: 3.70, dir: "RX", text: "LOAD READY", bytes: "4C 4F 41 44 20 52 45 41 44 59 0D 0A"},
+    {t: 5.05, dir: "RX", text: "TEMP=31.4C", bytes: "54 45 4D 50 3D 33 31 2E 34 43 0D 0A"},
+    {t: 6.20, dir: "TX", text: "TRIGGER START", bytes: "54 52 49 47 47 45 52 20 53 54 41 52 54 0D 0A"},
+    {t: 7.85, dir: "RX", text: "MEASURE DONE", bytes: "4D 45 41 53 55 52 45 20 44 4F 4E 45 0D 0A"},
+    {t: 9.10, dir: "TX", text: "STOP", bytes: "53 54 4F 50 0D 0A"}
+  ];
+
+  function fitCanvas(canvas, ctx) {
+    const dpr = window.devicePixelRatio || 1;
+    const r = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(r.width * dpr));
+    canvas.height = Math.max(1, Math.round(r.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return {w: r.width, h: r.height};
+  }
+  function xpx(t, w, pad) { return pad.l + (t / T) * (w - pad.l - pad.r); }
+  function ypx(v, min, max, h, pad) { return pad.t + (1 - (v - min) / (max - min)) * (h - pad.t - pad.b); }
+  function grid(ctx, w, h, pad, yLabels) {
+    ctx.font = "11px Segoe UI, Arial"; ctx.lineWidth = 1; ctx.strokeStyle = palette.grid; ctx.fillStyle = palette.axis;
+    for (let k=0;k<=5;k++) { const x = pad.l + k*(w-pad.l-pad.r)/5; ctx.beginPath(); ctx.moveTo(x,pad.t); ctx.lineTo(x,h-pad.b); ctx.stroke(); ctx.fillText((k*T/5).toFixed(0)+" s", x-8, h-8); }
+    yLabels.forEach((label, k) => { const y = pad.t + k*(h-pad.t-pad.b)/(yLabels.length-1); ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(w-pad.r,y); ctx.stroke(); ctx.fillText(label, 7, y+4); });
+  }
+  function line(ctx, points, color, width=2) { ctx.strokeStyle=color; ctx.lineWidth=width; ctx.beginPath(); points.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1])); ctx.stroke(); }
+  function markerLines(ctx, w, h, pad) {
+    events.forEach((e, idx) => {
+      const x=xpx(e.t,w,pad), isSelected=idx===selected;
+      ctx.strokeStyle=isSelected?"#fff":(e.dir==="RX"?palette.rx:palette.tx); ctx.globalAlpha=isSelected?0.9:0.42; ctx.lineWidth=isSelected?2:1;
+      ctx.setLineDash(isSelected?[]:[4,4]); ctx.beginPath(); ctx.moveTo(x,pad.t); ctx.lineTo(x,h-pad.b); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha=1;
+      if (showLabels || isSelected) { ctx.fillStyle=e.dir==="RX"?palette.rx:palette.tx; ctx.font=isSelected?"bold 11px Segoe UI":"10px Segoe UI"; ctx.fillText(e.dir+"  "+e.text, Math.min(x+4,w-145), pad.t+14+(idx%2)*14); }
+    });
+  }
+  function drawAnalog() {
+    const {w,h}=fitCanvas(analog,ctxU), pad={l:48,r:15,t:20,b:30}; ctxU.clearRect(0,0,w,h); ctxU.fillStyle="#0c1219"; ctxU.fillRect(0,0,w,h);
+    grid(ctxU,w,h,pad,["5.2 V","4.8 V","4.4 V","4.0 V"]);
+    const pu=[], pi=[];
+    for(let n=0;n<N;n++){const t=n*T/(N-1), current=0.12+0.19*(t>2.35?1:0)+0.035*Math.sin(t*3.2+phase)+0.012*Math.sin(t*17), voltage=5.03-0.08*current+0.012*Math.sin(t*1.5); pu.push([xpx(t,w,pad),ypx(voltage,3.8,5.3,h,pad)]); pi.push([xpx(t,w,pad), pad.t+(1-(current/0.42))*(h-pad.t-pad.b)]); }
+    line(ctxU,pu,palette.u,2); line(ctxU,pi,palette.i,2); markerLines(ctxU,w,h,pad);
+    document.getElementById("mU").textContent=(5.03-0.08*(0.12+0.19*(T>2.35?1:0))).toFixed(3)+" V";
+    document.getElementById("mI").textContent=(0.31+0.02*Math.sin(phase)).toFixed(3)+" A";
+    document.getElementById("mP").textContent=(5.03*0.31).toFixed(3)+" W";
+  }
+  function drawDigital() {
+    const {w,h}=fitCanvas(digital,ctxD), pad={l:48,r:15,t:18,b:26}; ctxD.clearRect(0,0,w,h); ctxD.fillStyle="#0c1219"; ctxD.fillRect(0,0,w,h);
+    // Eight clearly separated digital lanes. Each lane has a HIGH and LOW level.
+    const laneH=(h-pad.t-pad.b)/8;
+    ctxD.font="bold 11px Segoe UI, Arial";
+    for(let bit=0;bit<8;bit++){
+      const top=pad.t+bit*laneH, high=top+laneH*0.28, low=top+laneH*0.72;
+      ctxD.fillStyle=bit%2?"#111b25":"#0f1821"; ctxD.fillRect(pad.l,top,w-pad.l-pad.r,laneH);
+      ctxD.strokeStyle="#253746"; ctxD.lineWidth=1; ctxD.beginPath(); ctxD.moveTo(pad.l,top+laneH); ctxD.lineTo(w-pad.r,top+laneH); ctxD.stroke();
+      ctxD.fillStyle=palette.axis; ctxD.fillText("DI"+bit,8,top+laneH*0.58);
+      ctxD.fillStyle="#526678"; ctxD.font="9px Segoe UI, Arial"; ctxD.fillText("1",pad.l-13,high+3); ctxD.fillText("0",pad.l-13,low+3); ctxD.font="bold 11px Segoe UI, Arial";
+      ctxD.strokeStyle=["#64d8ff","#76e39c","#f6d365","#b894ff"][bit%4]; ctxD.lineWidth=2.5; ctxD.lineJoin="miter"; ctxD.beginPath();
+      for(let n=0;n<N;n++){
+        const t=n*T/(N-1); let state=((Math.floor(t*1.1)+bit)%3===0);
+        if(bit===0)state=t>2.35&&t<7.85;
+        if(bit===1)state=t>3.7;
+        if(bit===2)state=(Math.floor(t*2.2)%2)===0;
+        const x=xpx(t,w,pad), y=state?high:low;
+        if(n===0)ctxD.moveTo(x,y);else ctxD.lineTo(x,y);
+      }
+      ctxD.stroke();
+    }
+    markerLines(ctxD,w,h,pad);
+  }
+  function renderEvents(){
+    document.getElementById("events").innerHTML=events.map((e,i)=>`<div class="event ${i===selected?"selected":""}" data-index="${i}"><span class="time mono">${e.t.toFixed(2)}s</span><span class="dir ${e.dir.toLowerCase()}">${e.dir}</span><span class="preview">${e.text}<small class="mono">${e.bytes}</small></span></div>`).join("");
+    document.querySelectorAll(".event").forEach(el=>el.addEventListener("click",()=>{selected=Number(el.dataset.index); updateSelected(); drawAll();}));
+    const tl=document.getElementById("timeline"); tl.innerHTML=events.map((e,i)=>`<i class="${e.dir.toLowerCase()} ${i===selected?"selected":""}" style="left:${e.t/T*100}%" title="${e.dir} ${e.text}"></i>`).join("");
+    tl.querySelectorAll("i").forEach((el,i)=>el.addEventListener("click",()=>{selected=i;updateSelected();drawAll();}));
+  }
+  function updateSelected(){const e=events[selected], box=document.getElementById("selected"); box.querySelector(".eyebrow").textContent=`${e.dir} · ${e.t.toFixed(3)} s`; box.querySelector(".message").textContent=e.text; box.querySelector(".bytes").textContent=e.bytes; renderEvents();}
+  function drawAll(){drawAnalog();drawDigital();}
+  document.getElementById("run").addEventListener("click",()=>{running=!running;document.getElementById("run").textContent=running?"Pause":"Resume";});
+  document.getElementById("labels").addEventListener("click",()=>{showLabels=!showLabels;document.getElementById("labels").textContent="UART labels: "+(showLabels?"on":"off");drawAll();});
+  window.addEventListener("resize",drawAll);
+  updateSelected(); drawAll();
+  setInterval(()=>{if(running){phase+=0.08;drawAll();}},100);
+</script>
+</body>
+</html>

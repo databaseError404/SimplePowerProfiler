@@ -28,6 +28,13 @@
 #define I2C_DEV_SCL   GPIO_Pin_13 // PortB
 //#define GPIO_TEST     GPIO_Pin_7 // PortB
 
+// DIO inputs, in the physical connector order:
+// DIO0=PA4, DIO1=PA5, DIO2=PA15, DIO3=PA14,
+// DIO4=PA13, DIO5=PA12, DIO6=PA11, DIO7=PA10.
+#define DIO_INPUTS (GPIO_Pin_4 | GPIO_Pin_5 | GPIO_Pin_10 | GPIO_Pin_11 | \
+                    GPIO_Pin_12 | GPIO_Pin_13 | GPIO_Pin_14 | GPIO_Pin_15)
+#define DIO_INPUT_MODE GPIO_ModeIN_PU
+
 #define DEBUG_USB       0 // =DEBUG debug print usb
 #define DEBUG_I2C       0 // =DEBUG debug print i2c
 

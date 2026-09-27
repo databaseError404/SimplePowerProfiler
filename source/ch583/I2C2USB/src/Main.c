@@ -7,10 +7,33 @@
 #include "app_usb.h"
 #include "i2c_dev.h"
 
+#define STATUS_LED_PIN                  GPIO_Pin_8
+#define STATUS_LED_TOGGLE_PERIOD_TICKS  (FREQ_SYS / 2U)
+
 int old_send_len;
 
 app_drv_fifo_t app_tx_fifo;
 uint8_t app_tx_buffer[APP_TX_BUFFER_LENGTH];
+
+static uint32_t status_led_last_toggle;
+
+static void StatusLedInit(void)
+{
+  // The WeAct CH57x/CH58x Core Board LED is connected to PA8 and is active low.
+  GPIOA_SetBits(STATUS_LED_PIN);
+  GPIOA_ModeCfg(STATUS_LED_PIN, GPIO_ModeOut_PP_5mA);
+  status_led_last_toggle = GetSysTickCnt();
+}
+
+static void StatusLedTask(void)
+{
+  uint32_t now = GetSysTickCnt();
+
+  if((uint32_t)(now - status_led_last_toggle) >= STATUS_LED_TOGGLE_PERIOD_TICKS) {
+    status_led_last_toggle = now;
+    GPIOA_InverseBits(STATUS_LED_PIN);
+  }
+}
 
 /*********************************************************************
  * @fn      USBSendData
@@ -61,7 +84,7 @@ void DebugInit( void )
 /*********************************************************************
  * @fn      Main_Circulation
  *
- * @brief   Ö÷Ñ­»·
+ * @brief   Main loop
  *
  * @return  none
  */
@@ -86,6 +109,7 @@ void Main_Circulation(void)
     I2CDevTask();
 #endif
     USBSendData();
+    StatusLedTask();
   }
 }
 #endif
@@ -106,6 +130,7 @@ int main()
   GPIOB_ModeCfg(GPIO_TEST, GPIO_ModeOut_PP_5mA);
 #endif
   InitSysTickCnt();
+  StatusLedInit();
 #if USE_I2C_DEV
   I2CDevInit();
 #endif
@@ -137,6 +162,7 @@ int main()
     I2CDevTask();
 #endif
     USBSendData();
+    StatusLedTask();
 #if  DEBUG_USB
     if(debug_usb) {
       PRINT("usb: %02x\n", debug_usb);
@@ -146,5 +172,3 @@ int main()
   }
 #endif // USE_RAM_CODE
 }
-
-

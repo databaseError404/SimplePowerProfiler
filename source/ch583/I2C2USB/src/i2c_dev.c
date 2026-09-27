@@ -28,11 +28,25 @@ typedef struct __attribute__((packed)) _i2c_blk_t{
 
 i2c_blk_t i2c_blk;
 
+/* Read DIO in the connector order defined in common.h. */
+static inline uint8_t I2CDevReadDio(void) {
+  uint32_t pa = GPIOA_ReadPort();
+  return (uint8_t)(
+      (((pa >> 4) & 0x01) << 0) |  // PA4  -> DIO0
+      (((pa >> 5) & 0x01) << 1) |  // PA5  -> DIO1
+      (((pa >> 15) & 0x01) << 2) | // PA15 -> DIO2
+      (((pa >> 14) & 0x01) << 3) | // PA14 -> DIO3
+      (((pa >> 13) & 0x01) << 4) | // PA13 -> DIO4
+      (((pa >> 12) & 0x01) << 5) | // PA12 -> DIO5
+      (((pa >> 11) & 0x01) << 6) | // PA11 -> DIO6
+      (((pa >> 10) & 0x01) << 7));  // PA10 -> DIO7
+}
+
 #if USE_I2C_24BIT
 const dev_i2c_cfg_t def_cfg_i2c  = {
     .pktcnt = 0, // max = SMPS_BLK_CNT;
     .multiplier = 0,
-    .time = 1052, // us
+    .time = 1052, // us per INA228 channel conversion
     .clk_khz = 800,
     .init[0].dev_addr = I2C_ADDR_INA228,
     .init[0].reg_addr = INA228_RA_CONFIG,
@@ -122,6 +136,7 @@ void TMR1_IRQHandler(void) {
 	    {
 	      I2CBusReadWord(i2c_dev.raddr->dev_addr, i2c_dev.raddr->reg_addr, &i2c_dev.i2c_buf[i2c_dev.i2c_buf_wr]);
 	    }
+	    i2c_dev.i2c_dio_buf[i2c_dev.i2c_buf_wr] = I2CDevReadDio();
 	    i2c_dev.i2c_buf_wr++;
 	    i2c_dev.raddr++;
 	    if(i2c_dev.raddr->dev_addr == 0 || i2c_dev.raddr > &cfg_i2c.rd[MAX_READ_REGS-1]) {
@@ -238,6 +253,7 @@ int I2CDevWriteSetings(void) {
 
 /* I2C Device Init */
 void I2CDevInit(void) {
+    GPIOA_ModeCfg(DIO_INPUTS, DIO_INPUT_MODE);
     I2CDevReadSetings();
 #ifdef I2C_DEV_POWER
     i2c_printf("I2C: Power Off\r\n");
@@ -325,84 +341,46 @@ void I2CDevTask(void) {
 	uint32_t prd = i2c_dev.i2c_buf_rd;
 	uint32_t pwr = i2c_dev.i2c_buf_wr;
 	uint32_t size;
+	uint32_t raw_count;
+	uint32_t idx;
 	uint8_t *p = (uint8_t *)i2c_blk.data;
 	if(!cfg_i2c.pktcnt)
 		return;
-	if(pwr < prd) {
-		size = I2C_BUF_SIZE - prd + pwr;
-		if(size >= cfg_i2c.pktcnt) {
-			size = cfg_i2c.pktcnt;
-#if USE_I2C_24BIT
-      if(i2c_dev.i2c_rd_24bit) {
-        i2c_blk.count = cfg_i2c.pktcnt + cfg_i2c.pktcnt + cfg_i2c.pktcnt;
-        i2c_blk.id = CMD_DEV_EADC;
-        for(int i = prd; i < I2C_BUF_SIZE && size; i++) {
-          *p++ = (uint8_t)i2c_dev.i2c_buf[i];
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[i] >> 8);
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[i] >> 16);
-          size--;
-        }
-        i2c_dev.i2c_buf_rd = (uint8_t)size;
-        for(int i = 0; size; i++) {
-          *p++ = (uint8_t)i2c_dev.i2c_buf[i];
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[i] >> 8);
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[i] >> 16);
-          size--;
-        }
-      }
-      else
-#endif
-      {
-        i2c_blk.count = cfg_i2c.pktcnt + cfg_i2c.pktcnt;
-        i2c_blk.id = CMD_DEV_I2C;
-        for(int i = prd; i < I2C_BUF_SIZE && size; i++) {
-          *p++ = (uint8_t)i2c_dev.i2c_buf[i];
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[i] >> 8);
-          size--;
-        }
-        i2c_dev.i2c_buf_rd = (uint8_t)size;
-        for(int i = 0; size; i++) {
-          *p++ = (uint8_t)i2c_dev.i2c_buf[i];
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[i] >> 8);
-          size--;
-        }
-      }
-		}
-		else
-			return;
-
-	} else if (pwr > prd) {
-		size = pwr - prd;
-		if(size >= cfg_i2c.pktcnt) {
-			size = cfg_i2c.pktcnt;
-#if USE_I2C_24BIT
-      if(i2c_dev.i2c_rd_24bit) {
-        i2c_blk.count = cfg_i2c.pktcnt + cfg_i2c.pktcnt + cfg_i2c.pktcnt;
-        i2c_blk.id = CMD_DEV_EADC;
-        while(size) {
-          *p++ = (uint8_t)i2c_dev.i2c_buf[prd];
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[prd] >> 8);
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[prd++] >> 16);
-          size--;
-        }
-      }
-      else
-#endif
-      {
-        i2c_blk.count = cfg_i2c.pktcnt + cfg_i2c.pktcnt;
-        i2c_blk.id = CMD_DEV_I2C;
-        while(size) {
-          *p++ = (uint8_t)i2c_dev.i2c_buf[prd];
-          *p++ = (uint8_t)(i2c_dev.i2c_buf[prd++] >> 8);
-          size--;
-        }
-      }
-      i2c_dev.i2c_buf_rd = (uint8_t)prd;
-
-		} else
-			return;
-	} else
+	/* uint8_t ring indexes make subtraction wrap naturally at 256. */
+	size = (uint8_t)(pwr - prd);
+	if(size < cfg_i2c.pktcnt)
 		return;
+
+	raw_count = cfg_i2c.pktcnt;
+	idx = prd;
+#if USE_I2C_24BIT
+	if(i2c_dev.i2c_rd_24bit) {
+		/* INA228 data is VBUS/VSHUNT pairs plus one DIO byte per pair. */
+		i2c_blk.count = (uint8_t)(raw_count * 3 + (raw_count / 2));
+		i2c_blk.id = CMD_DEV_EADC;
+		for(uint32_t n = 0; n < raw_count; n++) {
+			uint32_t value = i2c_dev.i2c_buf[idx];
+			*p++ = (uint8_t)value;
+			*p++ = (uint8_t)(value >> 8);
+			*p++ = (uint8_t)(value >> 16);
+			/* The second reading in each VBUS/VSHUNT pair carries the snapshot. */
+			if((n & 1) != 0)
+				*p++ = i2c_dev.i2c_dio_buf[idx];
+			idx = (idx + 1) & (I2C_BUF_SIZE - 1);
+		}
+	} else
+#endif
+	{
+		i2c_blk.count = (uint8_t)(raw_count * 2);
+		i2c_blk.id = CMD_DEV_I2C;
+		for(uint32_t n = 0; n < raw_count; n++) {
+			uint16_t value = (uint16_t)i2c_dev.i2c_buf[idx];
+			*p++ = (uint8_t)value;
+			*p++ = (uint8_t)(value >> 8);
+			idx = (idx + 1) & (I2C_BUF_SIZE - 1);
+		}
+	}
+	i2c_dev.i2c_buf_rd = (uint8_t)(prd + raw_count);
 	size = 2 + i2c_blk.count;
   if(app_drv_fifo_write(&app_tx_fifo, (uint8_t *)&i2c_blk, (uint16_t *)&size) == APP_DRV_FIFO_RESULT_SUCCESS) {
     status.all_read_count++;

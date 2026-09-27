@@ -44,6 +44,7 @@ typedef struct {
 #if USE_I2C_24BIT
     uint8_t i2c_rd_24bit;           // флаг работы с 24 битами
     uint32_t i2c_buf[I2C_BUF_SIZE]; // буфер приема по таймеру с i2с, 1024 bytes
+    uint8_t i2c_dio_buf[I2C_BUF_SIZE]; // DIO snapshot for each I2C read
 #else
     uint16_t i2c_buf[I2C_BUF_SIZE]; // буфер приема по таймеру с i2с, 512 bytes
 #endif
