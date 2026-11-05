@@ -8,3 +8,6 @@ __pycache__/
 # Ранее отслеживаемые firmware-артефакты сохраняются в репозитории.
 !/source/ch583/I2C2USB/obj/I2C2USB.bin
 !/source/ch583/I2C2USB/obj/I2C2USB.hex
+
+# Out-of-tree сборка baseline (tools/stage1/build_baseline.sh): объекты, ELF, логи.
+/build/
