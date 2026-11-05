@@ -1,0 +1,10 @@
+# Кэш Python; исторический viewer хранится без сгенерированных .pyc.
+__pycache__/
+*.py[cod]
+
+# Локальные настройки IDE и промежуточные результаты сборки CH582F.
+/source/ch583/I2C2USB/.mrs/
+/source/ch583/I2C2USB/obj/*
+# Ранее отслеживаемые firmware-артефакты сохраняются в репозитории.
+!/source/ch583/I2C2USB/obj/I2C2USB.bin
+!/source/ch583/I2C2USB/obj/I2C2USB.hex

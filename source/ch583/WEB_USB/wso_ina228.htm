@@ -11,6 +11,19 @@
   <body>
 	<div style="height: auto; width: auto; background-color: #101015; color: white;border-style: none;">
 	<input type="button" id="butConnect" value="Open">
+	 INA228 speed:
+	<select id="ina228Speed" title="Conversion speed per channel">
+		<option value="0">20000 SPS (50 us)</option>
+		<option value="1" selected>11905 SPS (84 us)</option>
+		<option value="2">6666 SPS (150 us)</option>
+		<option value="3">3571 SPS (280 us)</option>
+		<option value="4">1851 SPS (540 us)</option>
+		<option value="5">950 SPS (1052 us)</option>
+		<option value="6">482 SPS (2074 us)</option>
+		<option value="7">242 SPS (4120 us)</option>
+	</select>
+	 Display:
+	<label><input type="checkbox" id="rawDataMode"> Raw data (last 5 s)</label>
 	 Average: <input type="radio" value="100" name="radiobx" onclick="SetAverage(1000);"/>100
 	 <input type="radio" value="50" name="radiobx" onclick="SetAverage(100);"/>50
 	 <input type="radio" value="20" name="radiobx" onclick="SetAverage(200);"/>20
@@ -36,6 +49,11 @@
 	<div id="labdiv1" style="text-align: center;"></div>
 	<div id="div_g2"></div>
 	<div id="labdiv2" style="text-align: center;"></div>
+	<div style="margin-top: 8px; color: LightSkyBlue;">Digital inputs
+		<span id="dioMask" style="margin-left: 12px;">mask: 0x00</span>
+	</div>
+	<div id="dioStatus" style="font-family: monospace; margin: 4px 0 6px 0;"></div>
+	<div id="div_g3"></div>
 	<input type="button" id="butOnOff" value="Stop">
 	<input type="button" id="butClr" value="Clear">
 	<input type="button" id="butSave" value="Save dat to .csv file">
@@ -52,8 +70,12 @@
 // Буфер входящих данных
 var datau = new Array();
 var datai = new Array();
+var rawDataU = new Array();
+var rawDataI = new Array();
 //
 const samples = 1000;
+const RAW_WINDOW_SEC = 5;
+const RAW_DRAW_POINTS_MAX = 6000;
 var average = 50; // ms * RENDER_FPS
 const RENDER_FPS = 10; // frames per sec	
 //
@@ -63,7 +85,17 @@ var rollpu = 1;
 var rollpi = 1;
 var guu = null;
 var gui = null;
+var gdio = null;
 var rend_timer;
+var dataDio = new Array();
+var dio_last = 0;
+var dio_sample_count = 0;
+var raw_sample_count = 0;
+var rawMode = false;
+var graphDataU = datau;
+var graphDataI = datai;
+var userTimeWindow = false;
+var followRightEdge = false;
 
 var $ = function(id) { return document.getElementById(id); }
 
@@ -94,6 +126,126 @@ pp.stop_cb = function () {
 }
 pp.new_adc_cb = AddData2Grf;
 
+var ina228SpeedChanging = false;
+var ina228Speeds = [
+	{index: 0, sps: 20000, time_us: 50},
+	{index: 1, sps: 11905, time_us: 84},
+	{index: 2, sps: 6666, time_us: 150},
+	{index: 3, sps: 3571, time_us: 280},
+	{index: 4, sps: 1851, time_us: 540},
+	{index: 5, sps: 950, time_us: 1052},
+	{index: 6, sps: 482, time_us: 2074},
+	{index: 7, sps: 242, time_us: 4120}
+];
+
+async function SetINA228Speed(value) {
+	if(ina228SpeedChanging)
+		return;
+	var speed = ina228Speeds[Number(value)];
+	if(speed == null)
+		return;
+
+	var select = $("ina228Speed");
+	var running = pp.dev.open && pp.dev.adc_wrk && pp.cfg != null && pp.cfg.name == "INA228";
+	ina228SpeedChanging = true;
+	select.disabled = true;
+	try {
+		if(running)
+			await pp.Stop();
+
+		config_ina228.time_us = speed.time_us;
+		config_ina228.init[3][2] = 0xB000 |
+			(speed.index << 3) | (speed.index << 6) | (speed.index << 9);
+		config_ina228.t_us = config_ina228.time_us << (config_ina228.multiplier + 1);
+		config_ina228.sps = (2000000.0/config_ina228.chnls)/config_ina228.t_us;
+
+		if(running) {
+			cur_idx = -1;
+			await pp.SendConfig(config_ina228);
+			infoline("INA228: " + speed.sps + " SPS selected");
+		} else {
+			infoline("INA228 speed: " + speed.sps + " SPS (will apply on Open)");
+		}
+	} finally {
+		select.disabled = false;
+		ina228SpeedChanging = false;
+	}
+}
+
+$("ina228Speed").addEventListener('change', function() {
+	SetINA228Speed(this.value);
+});
+
+function GetGraphDataU() {
+	return graphDataU;
+}
+
+function GetGraphDataI() {
+	return graphDataI;
+}
+
+function DecimateRawData(source, maxPoints) {
+	if(source.length <= maxPoints)
+		return source;
+	var result = new Array();
+	var bucketCount = Math.max(1, Math.floor(maxPoints / 2));
+	var step = (source.length - 1) / bucketCount;
+	for(var bucket = 0; bucket < bucketCount; bucket++) {
+		var first = Math.floor(bucket * step);
+		var last = Math.min(source.length, Math.floor((bucket + 1) * step));
+		if(last <= first)
+			last = first + 1;
+		var minIndex = first;
+		var maxIndex = first;
+		for(var index = first + 1; index < last; index++) {
+			if(source[index][1][1] < source[minIndex][1][1])
+				minIndex = index;
+			if(source[index][1][1] > source[maxIndex][1][1])
+				maxIndex = index;
+		}
+		if(minIndex <= maxIndex) {
+			result.push(source[minIndex]);
+			if(maxIndex != minIndex)
+				result.push(source[maxIndex]);
+		} else {
+			result.push(source[maxIndex]);
+			result.push(source[minIndex]);
+		}
+	}
+	return result;
+}
+
+function PrepareGraphData() {
+	if(rawMode) {
+		graphDataU = DecimateRawData(rawDataU, RAW_DRAW_POINTS_MAX);
+		graphDataI = DecimateRawData(rawDataI, RAW_DRAW_POINTS_MAX);
+	} else {
+		graphDataU = datau;
+		graphDataI = datai;
+	}
+}
+
+function TrimRawData() {
+	var limit = Math.max(1000, Math.ceil((pp.cfg.sps || 1) * RAW_WINDOW_SEC));
+	if(rawDataI.length > limit + 1000) {
+		var remove = rawDataI.length - limit;
+		rawDataU.splice(0, remove);
+		rawDataI.splice(0, remove);
+	}
+}
+
+function SetRawMode(value) {
+	rawMode = value;
+	userTimeWindow = false;
+	followRightEdge = false;
+	if(gui != null)
+		RendChart();
+}
+
+$("rawDataMode").addEventListener('change', function() {
+	SetRawMode(this.checked);
+});
+
 async function CmdDecode(value) {
 	await pp.CmdDecode(value);
 }
@@ -123,8 +275,16 @@ function SetAverage(x) {
 function ClearData() {
 	cur_idx = -1;
 	adc_cnt = 0;
+	dio_last = 0;
+	dio_sample_count = 0;
+	userTimeWindow = false;
+	followRightEdge = false;
 	datau = new Array();
 	datai = new Array();
+	rawDataU = new Array();
+	rawDataI = new Array();
+	dataDio = new Array();
+	raw_sample_count = 0;
 	datau.push([0, [0,0,0]]);
 	datau.push([1, [0,195.3125,195.3125]]);
 	datau.push([2, [0,28333.333,28333.333]]);
@@ -135,7 +295,54 @@ function ClearData() {
 	datai.push([2, [0,0,0]]);
 	datai.push([3, [0,0.00003125,0.00003125]]);
 	datai.push([4, [0,16.384,16.384]]);
+	dataDio.push(DioGraphRow(0, 0));
+	UpdateDioDisplay(0);
 	UpdateIntervalGRF(false);
+}
+
+function DioGraphRow(t, mask) {
+	var row = [t];
+	for(var bit = 0; bit < 8; bit++)
+		row.push((mask & (1 << bit)) ? bit + 0.85 : bit + 0.15);
+	return row;
+}
+
+function UpdateDioDisplay(mask) {
+	$("dioMask").innerHTML = "mask: 0x" + hex(mask, 2);
+	var html = "";
+	for(var bit = 0; bit < 8; bit++) {
+		var on = (mask & (1 << bit)) != 0;
+		html += '<span style="display:inline-block; min-width:68px; color:' +
+			(on ? 'Lime' : 'Gray') + ';">DIO' + bit + '=' + (on ? '1' : '0') + '</span>';
+	}
+	$("dioStatus").innerHTML = html;
+}
+
+function TrimDioData(minTime) {
+	if(dataDio.length == 0)
+		return;
+	var remove = 0;
+	while(remove + 1 < dataDio.length && dataDio[remove + 1][0] < minTime)
+		remove++;
+	if(remove > 0)
+		dataDio.splice(0, remove);
+	if(dataDio.length > 0 && dataDio[0][0] < minTime)
+		dataDio[0][0] = minTime;
+}
+
+function IsAtRightEdge(right, left) {
+	var graphI = rawMode ? rawDataI : datai;
+	if(graphI.length < 2)
+		return false;
+	var end = graphI[graphI.length - 1][0];
+	var span = (left !== undefined) ? right - left : 0;
+	var tolerance = Math.max(span * 0.02, 0.01);
+	return right >= end - tolerance;
+}
+
+function OnUserZoom(min, max) {
+	userTimeWindow = true;
+	followRightEdge = IsAtRightEdge(max, min);
 }
 
 function UpdateIntervalGRF(on = true) {
@@ -162,10 +369,31 @@ var sumu, sumi;
 var smaxu, smaxi;
 var sminu, smini;
 var adc_cnt;
-function AddData2Grf(du, di) {
+function AddData2Grf(du, di, dio) {
 	if(cur_idx < 0) {
 		datau = new Array();
 		datai = new Array();
+		rawDataU = new Array();
+		rawDataI = new Array();
+		dataDio = new Array();
+		dio_last = 0;
+		dio_sample_count = 0;
+		raw_sample_count = 0;
+		userTimeWindow = false;
+		followRightEdge = false;
+		var rawU = du*pp.cfg.kBus+pp.cfg.zBus;
+		var rawI = di*pp.cfg.kShunt+pp.cfg.zShunt;
+		rawDataU.push([0, [rawU, rawU, rawU]]);
+		rawDataI.push([0, [rawI, rawI, rawI]]);
+		raw_sample_count = 1;
+		if(dio !== undefined) {
+			dio_last = dio;
+			dio_sample_count = 1;
+			dataDio.push(DioGraphRow(0, dio));
+			UpdateDioDisplay(dio);
+		} else {
+			dataDio.push(DioGraphRow(0, 0));
+		}
 		cur_idx = 0;
 		adc_cnt = 0;
 		sumu = 0;
@@ -176,15 +404,34 @@ function AddData2Grf(du, di) {
 		smini = 0xffffffff;
 		return;
 	}
+	var rawTime = raw_sample_count / pp.cfg.sps;
+	var rawU = du*pp.cfg.kBus+pp.cfg.zBus;
+	var rawI = di*pp.cfg.kShunt+pp.cfg.zShunt;
+	rawDataU.push([rawTime, [rawU, rawU, rawU]]);
+	rawDataI.push([rawTime, [rawI, rawI, rawI]]);
+	raw_sample_count++;
+	TrimRawData();
+	if(dio !== undefined) {
+		var dioTime = dio_sample_count / pp.cfg.sps;
+		if(dio != dio_last)
+			dataDio.push(DioGraphRow(dioTime, dio));
+		dio_last = dio;
+		dio_sample_count++;
+		UpdateDioDisplay(dio);
+	}
 	if(adc_cnt > pp.cfg.sps/10) {
-		datau.push([adc_cnt*cur_idx/pp.cfg.sps, [sminu*pp.cfg.kBus+pp.cfg.zBus, sumu*pp.cfg.kBus/adc_cnt+pp.cfg.zBus, smaxu*pp.cfg.kBus+pp.cfg.zBus]]);
-		datai.push([adc_cnt*cur_idx/pp.cfg.sps, [smini*pp.cfg.kShunt+pp.cfg.zShunt, sumi*pp.cfg.kShunt/adc_cnt+pp.cfg.zShunt, smaxi*pp.cfg.kShunt+pp.cfg.zShunt]]);
+		var sampleTime = (dio_sample_count > 0) ?
+			(dio_sample_count - 1)/pp.cfg.sps : adc_cnt*cur_idx/pp.cfg.sps;
+		datau.push([sampleTime, [sminu*pp.cfg.kBus+pp.cfg.zBus, sumu*pp.cfg.kBus/adc_cnt+pp.cfg.zBus, smaxu*pp.cfg.kBus+pp.cfg.zBus]]);
+		datai.push([sampleTime, [smini*pp.cfg.kShunt+pp.cfg.zShunt, sumi*pp.cfg.kShunt/adc_cnt+pp.cfg.zShunt, smaxi*pp.cfg.kShunt+pp.cfg.zShunt]]);
+		dataDio.push(DioGraphRow(sampleTime, dio_last));
 		cur_idx++;
 		if(cur_idx == 2) {
 			UpdateIntervalGRF();
 		} else 	if(cur_idx >= samples) {
 			datau.shift();
 			datai.shift();
+			TrimDioData(datai[0][0]);
 		}
 		sumu = du;
 		smaxu = du;
@@ -272,6 +519,7 @@ function ShowGrf() {
 				labels: ['T', 'U'],
 				labelsDiv: $('labdiv1'),
 				legend: 'always',  // "follow"
+				zoomCallback: OnUserZoom,
 				digitsAfterDecimal: 6,
 //                strokeWidth: 2,
 //				errorBars: true,
@@ -290,10 +538,13 @@ function ShowGrf() {
 				labels: ['T', 'I'],
 				labelsDiv: $('labdiv2'),
 				legend: 'always',  // "follow"
+				zoomCallback: OnUserZoom,
 				digitsAfterDecimal: 6,
 				drawCallback: function(g) {
-		    		var opts = {dateWindow: this.xAxisRange(), 'file': datau};
-					guu.updateOptions(opts);},
+					var opts = {dateWindow: this.xAxisRange(), 'file': GetGraphDataU()};
+					guu.updateOptions(opts);
+					if(gdio != null)
+						gdio.updateOptions({'dateWindow': this.xAxisRange()});},
 				showRangeSelector: true,
               	rangeSelectorPlotFillColor: 'MediumSlateBlue',
               	rangeSelectorPlotFillGradientColor: 'rgba(123, 104, 238, 0)',
@@ -304,10 +555,81 @@ function ShowGrf() {
 				customBars: true,
 //				errorBars: true
 			});
-			var sync = Dygraph.synchronize(guu, gui, { zoom: false, selection: true});
+			gdio = new Dygraph(
+				$("div_g3"),
+				dataDio,
+				{
+					labels: ['T', 'DIO0', 'DIO1', 'DIO2', 'DIO3', 'DIO4', 'DIO5', 'DIO6', 'DIO7'],
+					colors: ['#00FFFF', '#FFB000', '#00FF66', '#FF66CC', '#66AAFF', '#FFFF66', '#CC99FF', '#FF9966'],
+					legend: 'never',
+					zoomCallback: OnUserZoom,
+					stepPlot: true,
+					strokeWidth: 2,
+					valueRange: [-0.1, 8.1],
+					showRangeSelector: false,
+					axes: {
+						x: {valueFormatter: function(x){return this.getLabels()[0] + ': '+ x.toPrecision(6);}},
+						y: {axisLabelFormatter: function(y){
+							var n = Math.round(y);
+							return (n >= 0 && n < 8) ? 'DIO' + n : '';
+						}}
+					}
+				}
+			);
+			var sync = Dygraph.synchronize(guu, gui, gdio, {
+				zoom: true,
+				selection: true,
+				range: false
+			});
+			InstallWheelZoom();
 //      $('#chk-zoom, #chk-selection').change(update);
 
 	}
+}
+
+function InstallWheelZoom() {
+	var graphs = [guu, gui, gdio];
+	var containers = [$("div_g1"), $("div_g2"), $("div_g3")];
+	containers.forEach(function(container, index) {
+		container.addEventListener('wheel', function(event) {
+			var graph = graphs[index];
+			if(graph == null || event.deltaY == 0)
+				return;
+			event.preventDefault();
+
+			var range = graph.xAxisRange();
+			var span = range[1] - range[0];
+			if(span <= 0)
+				return;
+			var rect = container.getBoundingClientRect();
+			var cursorX = event.clientX - rect.left;
+			var cursor = graph.toDataXCoord(cursorX);
+			var zoom = event.deltaY < 0 ? 0.8 : 1.25;
+			var newSpan = span * zoom;
+			var left = cursor - (cursor - range[0]) * zoom;
+			var right = cursor + (range[1] - cursor) * zoom;
+			if(newSpan > 0) {
+				userTimeWindow = true;
+				followRightEdge = IsAtRightEdge(right, left);
+				graphs.forEach(function(g) {
+					g.updateOptions({'dateWindow': [left, right]});
+				});
+			}
+		}, {passive: false});
+		container.addEventListener('dblclick', function() {
+			setTimeout(function() {
+				userTimeWindow = false;
+				followRightEdge = false;
+				RendChart();
+			}, 0);
+		});
+		container.addEventListener('mouseup', function() {
+			if(userTimeWindow && graph != null) {
+				var range = graph.xAxisRange();
+				followRightEdge = IsAtRightEdge(range[1], range[0]);
+			}
+		});
+	});
 }
 function avg(arr) {
 	var arrLen = arr.length, result = 0;
@@ -315,19 +637,27 @@ function avg(arr) {
 	return result / arrLen;
 }
 function RendChart(){
-	if(datai.length < 2)
+	PrepareGraphData();
+	var graphU = GetGraphDataU();
+	var graphI = GetGraphDataI();
+	if(graphI.length < 2)
 		return;
+	if(!userTimeWindow) {
+		var fullWindow = [graphI[0][0], graphI[graphI.length - 1][0]];
+		if(fullWindow[1] > fullWindow[0])
+			gui.updateOptions({'dateWindow': fullWindow});
+	} else if(followRightEdge && gui.dateWindow_) {
+		var latest = graphI[graphI.length - 1][0];
+		var windowSize = gui.dateWindow_[1] - gui.dateWindow_[0];
+		if(windowSize > 0)
+			gui.updateOptions({'dateWindow': [latest - windowSize, latest]});
+	}
 	var x = gui.xAxisRange();
-	if (gui.dateWindow_) { 
-		if ($("FixEnd").checked) {
-			var ls = datai.length - 1;
-			gui.dateWindow_[0] = datai[ls][0] - (x[1] - x[0]);
-			gui.dateWindow_[1] = datai[ls][0];
-		}
-		if(x[0] < datai[0][0]) 
-			gui.dateWindow_[0] = datai[0][0];
-		if(x[1] < datai[1][0]) 
-			gui.dateWindow_[1] = datai[1][0];
+	if (gui.dateWindow_) {
+		if(x[0] < graphI[0][0])
+			gui.dateWindow_[0] = graphI[0][0];
+		if(x[1] < graphI[1][0])
+			gui.dateWindow_[1] = graphI[1][0];
 	}
 	$('wdsize').innerHTML=((x[1]-x[0])).toFixed(3);
 
@@ -350,7 +680,8 @@ function RendChart(){
 	// R
 	$("ts4").innerHTML = formatR(xu, xi); // Ohm
 
-	if(datai.length != 0) gui.updateOptions({'file': datai});
+	if(graphI.length != 0) gui.updateOptions({'file': graphI});
+	if(gdio != null) gdio.updateOptions({'file': dataDio});
 }
 
 function convertArrayOfObjectsToCSV(value){
@@ -394,9 +725,14 @@ $("butSave").onclick =  function() {
 }
 function resizeApp() {
 	if(window.innerHeight > 320) {
-    	let x = (window.innerHeight-220)/5;
+		// Share the available height between U, I and DIO graphs: 2:3:2.
+		let available = window.innerHeight - 285;
+		if(available < 280)
+			available = 280;
+		let x = available/7;
 		$("div_g1").style.height = (x*2) + "px";
 		$("div_g2").style.height = (x*3) + "px";
+		$("div_g3").style.height = (x*2) + "px";
 	//$("div_v").style.width = (window.innerWidth-50) + "px";
 	}
 }

@@ -1,0 +1,258 @@
+{
+  "source_directory": "D:\\2026\\PowerProfiler\\SimplePowerProfiler",
+  "destination_directory": "D:\\2026\\PowerProfiler\\SimplePowerProfiler_my",
+  "source_head": "08b40548832573a52b3637d3fad2f6fbb051cd03",
+  "destination_base_head": "1a4bbc80ba2233c337a42802ebcdf2a62550d33d",
+  "source_has_uncommitted_changes": true,
+  "copied": [
+    {
+      "source": "source/ch583/WEB_USB/wso_ina228.htm",
+      "destination": "source/ch583/WEB_USB/wso_ina228.htm",
+      "sha256": "ec56b4e3423bddfa827f45ea116051bd64baa1944a4843244efe6fa3908c1e64",
+      "reason": "Neighbor page with speed selection, raw 5s, DIO and zoom. Local basic page retained separately."
+    },
+    {
+      "source": "source/Python/README.md",
+      "destination": "source/Python/README.md",
+      "sha256": "5c7aee6934c519960419260980348ddf4f71015209ff38cffc72ad6d4393146c",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "source/Python/ina228_viewer.py",
+      "destination": "source/Python/ina228_viewer.py",
+      "sha256": "094e69040b531248059e7189c3ff3b2d616b58db883b1e105125d87da4e377ba",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "source/Python/ina228_viewer.json",
+      "destination": "source/Python/ina228_viewer.json",
+      "sha256": "fc9c8dcb51870bc82441918221b1f5714dc47d465b5ed3e7536dbeb3ce2c7a2b",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "source/Python/run_ina228_viewer.bat",
+      "destination": "source/Python/run_ina228_viewer.bat",
+      "sha256": "c1a3e786e5682943a60222f2a75f88054d396c885e57c017afcaa9084a2e784a",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler026/CH582F_1024_0007.hex",
+      "destination": "bin/PowerProfiler026/CH582F_1024_0007.hex",
+      "sha256": "b348c8a546e8abbcc8f81dfd541c8a807a7e19fe419e7f4cd42a4e83236232db",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler026/CH592F_1024_0007.hex",
+      "destination": "bin/PowerProfiler026/CH592F_1024_0007.hex",
+      "sha256": "891e3cc6fb50706e65ddbbbb5e1a1534de36949d87ad8c781fe87c9ab9d2e4b8",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler026/JDY-10-TLSR8266-10-21V0009.bin",
+      "destination": "bin/PowerProfiler026/JDY-10-TLSR8266-10-21V0009.bin",
+      "sha256": "1a505e18f05cc6f33e19c0ff16a3d4daae6598f98920acf4d0d3262dc26fd1b1",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler026/PowerProfiler.ini",
+      "destination": "bin/PowerProfiler026/PowerProfiler.ini",
+      "sha256": "7e3eff6113406533f121f728e952d8704f5f0e39b40c93eb5e89fd1b23d2d4d8",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler026/PowerProfiler026.exe",
+      "destination": "bin/PowerProfiler026/PowerProfiler026.exe",
+      "sha256": "f6daccb5750aec5e60060ff795d5cca9e3cc71c68c44e0aa5af5c5cff4c3ca6a",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler026/spp_bl702_v10220001.bin",
+      "destination": "bin/PowerProfiler026/spp_bl702_v10220001.bin",
+      "sha256": "406d01f5b2d413647247c7e6e28cc7113aa245bb72f362e18d182596c40066fc",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler026/STM32F103C8-INA-00-16V010.hex",
+      "destination": "bin/PowerProfiler026/STM32F103C8-INA-00-16V010.hex",
+      "sha256": "476727143d83272656bddde7059288d4a747cc18818ed07f102687a9397fc02d",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler_INA228_0128/app_data.csv",
+      "destination": "bin/PowerProfiler_INA228_0128/app_data.csv",
+      "sha256": "98cd427504ced372d88ffd5bb35bf2d3ff2a27cf1bf35727435da318269e5360",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler_INA228_0128/CH582F_1024_0007.hex",
+      "destination": "bin/PowerProfiler_INA228_0128/CH582F_1024_0007.hex",
+      "sha256": "b348c8a546e8abbcc8f81dfd541c8a807a7e19fe419e7f4cd42a4e83236232db",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler_INA228_0128/CH592F_1024_0007.hex",
+      "destination": "bin/PowerProfiler_INA228_0128/CH592F_1024_0007.hex",
+      "sha256": "891e3cc6fb50706e65ddbbbb5e1a1534de36949d87ad8c781fe87c9ab9d2e4b8",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler_INA228_0128/PowerProfiler.ini",
+      "destination": "bin/PowerProfiler_INA228_0128/PowerProfiler.ini",
+      "sha256": "acda4917ca2af32c4ee2550031812b78c7819e7725145dd6003c2e56c7d77d18",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler_INA228_0128/PowerProfiler_INA228_0128.exe",
+      "destination": "bin/PowerProfiler_INA228_0128/PowerProfiler_INA228_0128.exe",
+      "sha256": "a3436735b9026a4df949627f29709ad6ad750cd1b29932d2451313dba9f45901",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler_INA228_0128/pp_bl702.bin",
+      "destination": "bin/PowerProfiler_INA228_0128/pp_bl702.bin",
+      "sha256": "3985d8df85f32f35bfc58fb01da63f38d13a967133e9d57cd40d6b927372efe3",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "bin/PowerProfiler_INA228_0128/web_data.csv",
+      "destination": "bin/PowerProfiler_INA228_0128/web_data.csv",
+      "sha256": "5078278c1a2721acfbbe37d63a4d154bd2848f44e1c9875879e7f4df9366c798",
+      "reason": "Imported byte-for-byte."
+    },
+    {
+      "source": "source/ch583/I2C2USB/obj/I2C2USB.bin",
+      "destination": "bin/legacy-import/SimplePowerProfiler/I2C2USB.bin",
+      "sha256": "30a60dcdacb4641c0e15510ff4ff32692b3a552f31243fbe35d053660f4dbf63",
+      "reason": "Unverified neighbor build; active destination binaries retained."
+    },
+    {
+      "source": "source/ch583/I2C2USB/obj/I2C2USB.hex",
+      "destination": "bin/legacy-import/SimplePowerProfiler/I2C2USB.hex",
+      "sha256": "eee8f0d0d633af6c17cf80ed333b59754feb8ef0aad4b44599c882b9b82d2bc0",
+      "reason": "Unverified neighbor build; active destination binaries retained."
+    },
+    {
+      "source": "source/ch583/I2C2USB/src/Main.c",
+      "destination": "docs/legacy-import/SimplePowerProfiler/Main.c",
+      "sha256": "225732e471e3cc42d61d2b44546960455cab8a85748f7eda19dcf2ed5afe3dd6",
+      "reason": "Original neighbor Main.c for reference only; active local Main.c keeps LED."
+    }
+  ],
+  "preserved": [
+    {
+      "path": "source/ch583/WEB_USB/wso_ina228_basic_legacy.htm",
+      "sha256": "13eb0feb8d383415392b47a4f9163e31f8dfdc792a0bed6ef8e6d4cbcde20262",
+      "reason": "Local basic page before import.",
+      "original_path": "source/ch583/WEB_USB/wso_ina228.htm"
+    },
+    {
+      "path": "source/ch583/I2C2USB/src/Main.c",
+      "sha256": "c40835176174278ee73997586162a7e1b7af32db4ccfa1b10f0c527fb65a78d0",
+      "reason": "Local LED patch retained."
+    },
+    {
+      "path": "source/ch583/WEB_USB/wso_ina228+DIO.htm",
+      "sha256": "0d8d3d1d9207d1d630db792720b33a2b623c8baa0b33a23bfd66830e149917cd",
+      "reason": "Local raw-ring and viewport page retained."
+    },
+    {
+      "path": "source/ch583/I2C2USB/obj/I2C2USB.bin",
+      "sha256": "808f11ed628c780083f1459de175eded4907280e37984ba114e3ce43cd9a728a",
+      "reason": "Active destination binary not rebuilt or replaced."
+    },
+    {
+      "path": "source/ch583/I2C2USB/obj/I2C2USB.hex",
+      "sha256": "9563b0aa530df355d15fe692862df700a0370ede4f3054bf71b1fdc2fefe9e5a",
+      "reason": "Active destination binary not rebuilt or replaced."
+    },
+    {
+      "path": "source/ch583/I2C2USB/.settings/language.settings.xml",
+      "sha256": "b7a2c871abd0bc69644d3726853cd977c4d86299f1b4777cc0a5f049e540df24",
+      "reason": "Local IDE config retained."
+    }
+  ],
+  "already_identical": [
+    {
+      "path": "source/ch583/I2C2USB/src/common.h",
+      "sha256": "1ef2dec65757cda8a9532113bbb15a8b340f3c21f95dc2ddec6b6a7915df36b5"
+    },
+    {
+      "path": "source/ch583/I2C2USB/src/i2c_dev.c",
+      "sha256": "dd7d28f1bb3463f252d89e2c1b569634094cab695ee540fce5f6c99486bc3b31"
+    },
+    {
+      "path": "source/ch583/I2C2USB/src/i2c_dev.h",
+      "sha256": "3546db9bd49cabbb05728c219a34084ce183e3178d7456e157594274cd635055"
+    },
+    {
+      "path": "source/ch583/WEB_USB/pp.js",
+      "sha256": "d3ffe756cb329acdf8800483e0f740d9e92eb765f330365de7d6ea7015164bb6"
+    },
+    {
+      "path": "source/ch583/WEB_USB/serial.js",
+      "sha256": "1252f995e13182461a35b50c778a3c8edb7bdf27ab1ed5e7c7e26d5d260e131d"
+    },
+    {
+      "path": "source/ch583/WEB_USB/demo_ina228_uart.html",
+      "sha256": "676ef30fca5a6908bbbd4b23cc9a7871c0221b608e02e0a643585fba57ee7dda"
+    }
+  ],
+  "excluded": [
+    {
+      "path": ".git/",
+      "reason": "Keep destination repository and history."
+    },
+    {
+      "path": "source/Python/__pycache__/",
+      "reason": "Generated Python cache."
+    },
+    {
+      "path": "source/ch583/I2C2USB/.mrs/",
+      "reason": "Local IDE workspace."
+    },
+    {
+      "path": "source/ch583/I2C2USB/.settings/language.settings.xml",
+      "reason": "Only local env-hash differs; keep destination."
+    },
+    {
+      "path": "source/ch583/I2C2USB/obj/ except archived I2C2USB.bin and I2C2USB.hex",
+      "reason": "Generated objects, dependencies, ELF, listing, map and makefiles are not imported."
+    }
+  ],
+  "verification": {
+    "all_copies_byte_identical": true,
+    "retained_variants_preserved": true,
+    "source_tree_unchanged": true,
+    "firmware_rebuilt": false,
+    "hardware_tested": false,
+    "source_inventory_coverage": {
+      "identical_or_preserved": 1878,
+      "preserved_with_documentation_extension": 1,
+      "excluded_generated_or_local": 51
+    },
+    "retained_files_match_destination_base": true,
+    "python_ast_and_config_json_valid": true,
+    "javascript_syntax_checked": [
+      "pp.js",
+      "serial.js",
+      "dygraph.js",
+      "synchronizer.js",
+      "wso_ina228.htm",
+      "wso_ina228_basic_legacy.htm",
+      "wso_ina228+DIO.htm",
+      "demo_ina228_uart.html"
+    ],
+    "relative_web_dependencies_exist": true,
+    "tracked_diff_check_clean": true,
+    "runtime_or_hardware_tests_run": false
+  },
+  "documentation_updates": [
+    {
+      "path": "README.md",
+      "source_sha256": "4928a0e24717a697027359560909f9c9780d12d3db21c11ea0e2b1847987f1e0",
+      "destination_sha256": "b813e93cdef9c771b0728a1e8db748da7e3e0985e6fd4345d4130881b00e85bc",
+      "original_content_preserved": true,
+      "change": "Added links to PLAN.md and docs/IMPORT_NOTES.md; original content retained."
+    }
+  ]
+}

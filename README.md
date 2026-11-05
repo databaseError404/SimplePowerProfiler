@@ -1,6 +1,14 @@
 # SimplePowerProfiler
 Simple PowerProfiler on INA219, INA226, INA228, INA229, INA231, INA3221
 
+## Доработки CH582F + INA228
+
+- [Поэтапный план: 8 DIO, UART RX и чистый веб-интерфейс](PLAN.md).
+- [Что собрано из соседней папки и какие варианты сохранены](docs/IMPORT_NOTES.md).
+
+Текущее состояние — checkpoint старых наработок, не проверенный новый релиз.
+Следующие доработки выполняются по одному этапу плана; Python viewer сохранён только как историческая наработка.
+
 ## For INA226, INA231, INA3221
 
 ![SCH](https://raw.githubusercontent.com/pvvx/SimplePowerProfiler/main/docs/SPP-INA3221.png)
