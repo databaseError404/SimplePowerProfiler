@@ -32,6 +32,8 @@ extern dev_i2c_cfg_t cfg_i2c;
 typedef struct {
     volatile uint32_t all_read_count;
     volatile uint32_t all_overflow_cnt; // счетчик overflow
+    volatile uint32_t ring_lost_cnt;    // чтения, потерянные из-за перезаписи кольца измерений (ISR)
+    volatile uint32_t i2c_err_cnt;      // ошибки/таймауты чтения I2C в ISR
 } status_sps_t;
 
 extern status_sps_t status;

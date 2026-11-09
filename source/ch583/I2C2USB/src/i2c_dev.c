@@ -13,7 +13,9 @@
 #include "crc16.h"
 
 #define MAX_I2C_PKTCNT16 60 // (SMPS_BLK_CNT/2)
-#define MAX_I2C_PKTCNT24 40 // (SMPS_BLK_CNT/3)
+// 24-bit mode: payload = pktcnt*3 + pktcnt/2 bytes; i2c_blk.data is uint16_t[60] = 120 bytes.
+// pktcnt > 34 (or odd pktcnt, which splits U/I pairs across blocks) is rejected in I2CDevStart().
+#define MAX_I2C_PKTCNT24 34
 
 #define MIN_TIM_IRQ 70000 // (min 55 us)  70000/clk_khz  2*5w*10bit*1500000/clk = us
 
@@ -127,15 +129,24 @@ void TMR1_IRQHandler(void) {
 #endif
   if(TMR1_GetITFlag(RB_TMR_IF_CYC_END)) {
 	  if(i2c_dev.timer_flg) {
+	    int rd_err;
+	    /* РџРµСЂРµР·Р°РїРёСЃСЊ РЅРµРїСЂРѕС‡РёС‚Р°РЅРЅРѕРіРѕ РєРѕР»СЊС†Р° РёР·РјРµСЂРµРЅРёР№: Р±РµР· СЃС‡С‘С‚С‡РёРєР° С‚Р°РєР°СЏ РїРѕС‚РµСЂСЏ
+	     * (РѕСЃРЅРѕРІРЅРѕР№ С†РёРєР» РЅРµ СѓСЃРїРµРІР°РµС‚ СЂР°Р·Р±РёСЂР°С‚СЊ Р±Р»РѕРєРё) Р±С‹Р»Р° Р±С‹ РЅРµ РІРёРґРЅР° С…РѕСЃС‚Сѓ. */
+	    if((uint8_t)(i2c_dev.i2c_buf_wr - i2c_dev.i2c_buf_rd) >= (I2C_BUF_SIZE - 1)) {
+	      status.ring_lost_cnt++;
+	    }
 #if USE_I2C_24BIT
 	    if(i2c_dev.i2c_rd_24bit) {
-	      I2CBusRead24bits(i2c_dev.raddr->dev_addr, i2c_dev.raddr->reg_addr, &i2c_dev.i2c_buf[i2c_dev.i2c_buf_wr]);
+	      rd_err = I2CBusRead24bits(i2c_dev.raddr->dev_addr, i2c_dev.raddr->reg_addr, &i2c_dev.i2c_buf[i2c_dev.i2c_buf_wr]);
 	    }
 	    else
 #endif
 	    {
-	      I2CBusReadWord(i2c_dev.raddr->dev_addr, i2c_dev.raddr->reg_addr, &i2c_dev.i2c_buf[i2c_dev.i2c_buf_wr]);
+	      rd_err = I2CBusReadWord(i2c_dev.raddr->dev_addr, i2c_dev.raddr->reg_addr, &i2c_dev.i2c_buf[i2c_dev.i2c_buf_wr]);
 	    }
+	    /* Р Р°РЅСЊС€Рµ СЂРµР·СѓР»СЊС‚Р°С‚ С‡С‚РµРЅРёСЏ РёРіРЅРѕСЂРёСЂРѕРІР°Р»СЃСЏ: СЃР±РѕР№РЅС‹Р№/С‡Р°СЃС‚РёС‡РЅС‹Р№ РєР°РґСЂ РјРѕР»С‡Р° РїРѕРїР°РґР°Р» РІ РїРѕС‚РѕРє. */
+	    if(rd_err)
+	      status.i2c_err_cnt++;
 	    i2c_dev.i2c_dio_buf[i2c_dev.i2c_buf_wr] = I2CDevReadDio();
 	    i2c_dev.i2c_buf_wr++;
 	    i2c_dev.raddr++;
@@ -278,6 +289,15 @@ int I2CDevStart(void) {
 	  if(cfg_i2c.pktcnt > MAX_I2C_PKTCNT16)
 	    cfg_i2c.pktcnt = MAX_I2C_PKTCNT16;
 	}
+	/* Ёмкость выходного блока и чётность pktcnt: в 24-битном режиме в i2c_blk.data
+	 * (120 Б) пишется pktcnt*3 + pktcnt/2 байт, а нечётный pktcnt разрывает пару
+	 * U/I/DIO на границе блока. Такие конфигурации отклоняем, а не применяем молча. */
+	if(cfg_i2c.pktcnt && (cfg_i2c.pktcnt & 1)) {
+		cfg_i2c.pktcnt = 0;
+		I2CDevTimerStop();
+		PRINT("I2C: Error pktcnt: must be even!\r\n");
+		return 0;
+	}
 	clk_khz = cfg_i2c.clk_khz & 0x7fff;
 	if(clk_khz < MIN_I2C_CLK_KHZ || clk_khz > MAX_I2C_CLK_KHZ) {
 		clk_khz = DEF_I2C_CLK_KHZ;
@@ -300,6 +320,8 @@ int I2CDevStart(void) {
 		// start (new) counts
 	  status.all_read_count = 0;
 		status.all_overflow_cnt = 0;
+		status.ring_lost_cnt = 0;
+		status.i2c_err_cnt = 0;
 	} else {
 	    I2CDevTimerStop();
 		// РІС‹С…РѕРґ РїРѕ Stop (cfg_i2c.rd_count = 0), init dev i2c only

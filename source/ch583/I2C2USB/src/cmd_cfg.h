@@ -27,6 +27,11 @@
 #define CMD_DEV_CPU	0x04 // Connect parameters Update (BLE)
 #define CMD_DEV_BLE	0x05 // BLE parameters Update (BLE)
 // 0x06
+// Protocol version / capabilities (���� 2 �����): ������ + �������� + ���������� pktcnt
+#define CMD_DEV_PVER	0x14 // Get protocol version/capabilities
+#define PROTO_VER		2    // 1 = ������ 0x3A � STA(8), 2 = +PVER � ����������� STA(16)
+#define PROTO_FLAG_SEQ	0x00 // ������: 1 = ��������� 0x3B � �������� ������ (�� �����������)
+#define PROTO_MAX_PKTCNT 34  // ���������� �������� pktcnt � 24-������ ������
 // I2C/SMBUS out regs
 #define CMD_DEV_I2C	0x07 // blk out regs i2c data
 // ADC cfg
@@ -90,9 +95,13 @@ typedef struct  __attribute__((packed)) _reg_rd_t{
 } reg_rd_t;
 
 // CMD_DEV_STA  Status
+// Расширение (Этап 2): добавлены счётчики перезаписи кольца и ошибок I2C.
+// Старый хост читает первые 8 байт — длина кадра задана полем size.
 typedef struct  __attribute__((packed)) _dev_sta_t{
-	uint32_t rd_cnt; // счетчик samples
-	uint32_t to_cnt; // счетчик не переданных или timeout при передаче samples
+	uint32_t rd_cnt;    // счетчик отправленных блоков
+	uint32_t to_cnt;    // счетчик не переданных блоков (переполнение FIFO)
+	uint32_t ring_lost; // чтения, потерянные из-за перезаписи кольца измерений
+	uint32_t i2c_err;   // ошибки/таймауты чтения I2C
 } dev_sta_t;
 
 // CMD_DEV_DBG  Debug

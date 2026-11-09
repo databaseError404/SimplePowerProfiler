@@ -131,6 +131,14 @@ unsigned int cmd_decode(blk_tx_pkt_t * pbufo, blk_rx_pkt_t * pbufi, unsigned int
 				pbufo->data.ui[1] = INT_DEV_VER; // Ver 1.2.3.4 = 0x1234
 				txlen = sizeof(uint16_t) + sizeof(uint16_t) + sizeof(blk_head_t);
 				break;
+			case CMD_DEV_PVER: // Get protocol version/capabilities (Этап 2)
+				// [0] версия протокола, [1] признаки, [2] безопасный pktcnt, [3] байт на пару 0x3A
+				pbufo->data.uc[0] = PROTO_VER;
+				pbufo->data.uc[1] = PROTO_FLAG_SEQ;
+				pbufo->data.uc[2] = PROTO_MAX_PKTCNT;
+				pbufo->data.uc[3] = 7;
+				txlen = 4 + sizeof(blk_head_t);
+				break;
 #if (USE_I2C_DEV)
 			case CMD_DEV_CFG: // Get/Set CFG/ini & Start measure
         //PRINT("CMD_DEV_CFG\n");
@@ -271,6 +279,9 @@ unsigned int cmd_decode(blk_tx_pkt_t * pbufo, blk_rx_pkt_t * pbufi, unsigned int
 			  // PRINT("CMD_DEV_STA\n");
         pbufo->data.sta.rd_cnt = status.all_read_count;
         pbufo->data.sta.to_cnt = status.all_overflow_cnt;
+        // Расширение Этапа 2: потеря перезаписи кольца и ошибки I2C (раньше не считались вовсе)
+        pbufo->data.sta.ring_lost = status.ring_lost_cnt;
+        pbufo->data.sta.i2c_err = status.i2c_err_cnt;
 				txlen = sizeof(blk_head_t) + sizeof(dev_sta_t);
 				break;
 

@@ -89,7 +89,10 @@ app_drv_fifo_write(app_drv_fifo_t *fifo, uint8_t *data, uint16_t *p_write_length
     uint16_t available_count = fifo->size - fifo_length(fifo);
     uint16_t requested_len = (*p_write_length);
     if(available_count < requested_len) {
-        PRINT("FIFO full! %d < %d\n", available_count, requested_len);
+        /* Здесь был PRINT("FIFO full! ...") в UART1 — блокирующая печать (~2 мс на событие)
+         * останавливала основной цикл и усугубляла потери: при полном FIFO он успевал
+         * обработать лишь несколько сотен событий в секунду вместо ~1000.
+         * Счётчик отброшенных блоков ведёт вызывающий код (status.all_overflow_cnt). */
         return APP_DRV_FIFO_RESULT_LENGTH_ERROR;
     }
     uint16_t index = 0;
