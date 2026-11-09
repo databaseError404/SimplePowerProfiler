@@ -1,0 +1,81 @@
+################################################################################
+# MRS Version: 2.5.0
+# Automatically-generated file. Do not edit!
+################################################################################
+-include ../makefile.init
+
+RM := rm -rf
+
+# All of the sources participating in the build are defined here
+-include sources.mk
+-include src/subdir.mk
+-include StdPeriphDriver/subdir.mk
+-include Startup/subdir.mk
+-include RVMSIS/subdir.mk
+-include subdir.mk
+-include objects.mk
+
+ifneq ($(MAKECMDGOALS),clean)
+ifneq ($(strip $(S_DEPS)),)
+-include $(S_DEPS)
+endif
+ifneq ($(strip $(S_UPPER_DEPS)),)
+-include $(S_UPPER_DEPS)
+endif
+ifneq ($(strip $(ASM_DEPS)),)
+-include $(ASM_DEPS)
+endif
+ifneq ($(strip $(ASM_UPPER_DEPS)),)
+-include $(ASM_UPPER_DEPS)
+endif
+ifneq ($(strip $(C_DEPS)),)
+-include $(C_DEPS)
+endif
+endif
+
+-include ../makefile.defs
+
+# Add inputs and outputs from these tool invocations to the build variables 
+SECONDARY_FLASH += \
+I2C2USB.bin \
+I2C2USB.hex \
+
+SECONDARY_LIST += \
+I2C2USB.lst \
+
+SECONDARY_SIZE += \
+I2C2USB.siz \
+
+
+# All Target
+all: 
+	$(MAKE) --no-print-directory main-build 
+	$(MAKE) --no-print-directory post-build 
+
+main-build: I2C2USB.elf secondary-outputs
+
+post-build: 
+	 riscv-none-embed-objcopy -O ihex "I2C2USB.elf" "I2C2USB.hex" && riscv-none-embed-objcopy -O binary "I2C2USB.elf" "I2C2USB.bin"
+
+# Tool invocations
+I2C2USB.elf: $(OBJS) $(USER_OBJS_ESCAPE)
+	@	riscv-none-embed-gcc -march=rv32imac -mabi=ilp32 -mcmodel=medany -msmall-data-limit=8 -mno-save-restore -fmax-errors=20 -Os -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common -g -T "@PROJ_WIN@\Ld\Link.ld" -nostartfiles -Xlinker --gc-sections -L"@PROJ_WIN@" -L"@PROJ_WIN@\StdPeriphDriver" -Xlinker --print-memory-usage -Wl,-Map,"I2C2USB.map" --specs=nano.specs --specs=nosys.specs -o "I2C2USB.elf" $(OBJS) $(LIBS)
+I2C2USB.bin: I2C2USB.elf
+	@	riscv-none-embed-objcopy -O binary "I2C2USB.elf" "I2C2USB.bin"
+I2C2USB.hex: I2C2USB.elf
+	@	riscv-none-embed-objcopy -O ihex "I2C2USB.elf" "I2C2USB.hex"
+I2C2USB.lst: I2C2USB.elf
+	@	riscv-none-embed-objdump --source --all-headers --demangle --disassemble --line-numbers --wide "I2C2USB.elf" > "I2C2USB.lst"
+I2C2USB.siz: I2C2USB.elf
+	riscv-none-embed-size --format=berkeley "I2C2USB.elf"
+
+# Other Targets
+clean:
+	-$(RM) $(DIR_OBJS) $(SECONDARY_FLASH)$(SECONDARY_LIST)$(SECONDARY_SIZE) I2C2USB.elf
+	-$(RM) $(DIR_EXPANDS) $(CALLGRAPH_DOT)
+	-$(RM) $(DIR_DEPS)
+secondary-outputs: $(SECONDARY_FLASH) $(SECONDARY_LIST) $(SECONDARY_SIZE)
+
+.PHONY: all clean dependents
+
+-include ../makefile.targets

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>PowerProfiler recorder — self-test просмотра (Этап 4)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px 20px; background: #14161a; color: #e6e8ea;
+         font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .muted { color: #8b95a1; font-size: 12px; margin-bottom: 8px; }
+  #out { background: #101215; border: 1px solid #262b33; border-radius: 8px; padding: 10px;
+         font: 12px/1.55 Consolas, monospace; white-space: pre-wrap; }
+  .ok { color: #8ee08e; } .fail { color: #ff8f8f; } .sum { color: #9fd0ff; }
+  canvas { width: 100%; height: 300px; background: #101215; border: 1px solid #262b33; border-radius: 8px; }
+</style>
+</head>
+<body>
+<h1>Просмотр: self-test (LOD, метрики, отрисовка, FPS)</h1>
+<div class="muted">
+  Проверки Этапа 4 в браузере: пирамида против brute-force, импульс DIO шириной в пару,
+  стоимость кадра на 10/30/60 с, реальная отрисовка в canvas и измеренный FPS.
+</div>
+<div id="out"></div>
+<canvas id="cv"></canvas>
+
+<script type="module">
+import { LodPyramid, buildColumns } from './lod.js';
+import { rawMetrics, windowMetrics } from './metrics.js';
+import { PairStore } from './store.js';
+import { Viewport } from './viewport.js';
+import { ChartRenderer } from './render.js';
+
+const out = document.getElementById('out');
+const report = (line) => { try { fetch('/__result', { method: 'POST', body: line }); } catch (e) { /* ignore */ } };
+let pass = 0, fail = 0;
+function check(name, cond, extra = '') {
+  const line = document.createElement('div');
+  line.className = cond ? 'ok' : 'fail';
+  line.textContent = (cond ? '✔ ' : '✖ ') + name + (extra ? '  ' + extra : '');
+  out.appendChild(line);
+  cond ? pass++ : fail++;
+  report((cond ? 'OK   ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+}
+function note(text) {
+  const d = document.createElement('div');
+  d.className = 'sum';
+  d.textContent = text;
+  out.appendChild(d);
+  report('SUM  ' + text);
+}
+
+// --- данные ------------------------------------------------------------------
+function makeSource(n, seed = 1, pulseAt = -1) {
+  const st = new PairStore({ chunkPairs: 4096 });
+  let s = seed >>> 0;
+  const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  for (let k = 0; k < n; k++) {
+    let u = 270000 + Math.floor(rnd() * 3000) - 1500;
+    let i = Math.floor(rnd() * 2000) - 1000;
+    let dio = (k % 700 < 5) ? 0x01 : 0x00;
+    if (k === 100) u = 0xFFFFFF;          // всплеск U
+    if (k === n - 1) i = -0x800000;       // всплеск I в конце
+    if (k === pulseAt) dio = 0x08;        // импульс DIO шириной в одну пару
+    st.append(u, i, dio);
+  }
+  return st;
+}
+
+// --- 1. LOD против brute-force ----------------------------------------------
+const N = 40000;
+const src = makeSource(N, 7, 12345);
+const py = new LodPyramid();
+py.addFrom(src, 0, N);
+let lodOk = true;
+for (let level = 0; level < py.levels.length; level++) {
+  const bp = py.bucketPairs(level);
+  for (let b = 0; b * bp < N; b++) {
+    const from = b * bp, to = Math.min((b + 1) * bp, N);
+    const want = rawMetrics(src, from, to);
+    const got = py.bucketOf(level, from);
+    if (!got || got.minU !== want.minU || got.maxU !== want.maxU
+      || got.minI !== want.minI || got.maxI !== want.maxI || got.dioChanges !== want.dioChanges) {
+      lodOk = false;
+      break;
+    }
+  }
+  if (!lodOk) break;
+}
+check('LOD: экстремумы и смены DIO всех бакетов равны brute-force', lodOk,
+  `${py.levels.length} уровней, всплески на 100 и ${N - 1} паре`);
+
+// --- 2. импульс DIO шириной в одну пару ------------------------------------
+const wide = buildColumns(py, src, { from: 0, to: N, columns: 300 });
+let seenWide = false;
+for (let c = 0; c < wide.columns; c++) if (wide.dioOr[c] & 0x08) seenWide = true;
+check('DIO: импульс шириной 1 пара виден на обзоре (активность)', seenWide);
+
+const zoom = buildColumns(py, src, { from: 12345 - 4, to: 12345 + 4, columns: 8 });
+check('DIO: при зуме импульс виден точно (режим сырых пар)',
+  zoom.raw && zoom.dioExact && zoom.dioExact[4] === 0x08 && zoom.dioExact[3] === 0x00);
+
+// --- 3. метрики окна точны --------------------------------------------------
+const wm = windowMetrics(py, src, 1000, 30000, { withAvg: true });
+const want = rawMetrics(src, 1000, 30000);
+check('метрики окна: min/max/средние совпадают с brute-force',
+  wm.minU === want.minU && wm.maxU === want.maxU && wm.minI === want.minI && wm.maxI === want.maxI
+  && Math.abs(wm.avgU - want.avgU) < 1e-9);
+
+// --- 4. стоимость кадра 10/30/60 с ------------------------------------------
+const canvas = document.getElementById('cv');
+const rows = [];
+for (const seconds of [10, 30, 60]) {
+  const total = seconds * 10000;
+  const s2 = makeSource(total, seconds);
+  const p2 = new LodPyramid();
+  p2.addFrom(s2, 0, total);
+  const renderer = new ChartRenderer(canvas, { source: s2, pyramid: p2, calib: { k_bus_mv_per_code: 0.01220703125, k_shunt_ma_per_code: 0.00001953125 } });
+  renderer.resize(1200, 420, 1);
+  const vp = new Viewport({ pairs: total, pairsPerSecond: 10000 });
+  vp.setRange(Math.floor(total / 2), Math.min(total, Math.floor(total / 2) + 50000));
+  renderer.draw(vp, { columns: 1200 });      // прогрев
+  const times = [];
+  for (let k = 0; k < 10; k++) times.push(renderer.draw(vp, { columns: 1200 }).totalMs);
+  times.sort((a, b) => a - b);
+  rows.push({ seconds, med: times[times.length >> 1] });
+}
+note('кадр (окно + обзор): ' + rows.map((r) => `${r.seconds} с → ${r.med.toFixed(2)} мс`).join(', '));
+const base = rows[0].med;
+const ratio = Math.max(...rows.map((r) => r.med / base));
+check('стоимость кадра не растёт с длиной записи (норма ≤ 1,5)', ratio <= 1.5,
+  `максимальное отношение ${ratio.toFixed(2)}`);
+
+// --- 5. FPS: реальные кадры подряд (как при просмотре) ----------------------
+const s3 = makeSource(600000, 3);
+const p3 = new LodPyramid();
+p3.addFrom(s3, 0, 600000);
+const r3 = new ChartRenderer(canvas, { source: s3, pyramid: p3, calib: { k_bus_mv_per_code: 0.01220703125, k_shunt_ma_per_code: 0.00001953125 } });
+r3.resize(1200, 460, 1);
+const vp3 = new Viewport({ pairs: 600000, pairsPerSecond: 10000 });
+vp3.setRange(0, 600000);
+const frames = 60;
+const t0 = performance.now();
+for (let k = 0; k < frames; k++) {
+  vp3.zoomAt(600, k % 2 ? 1.01 : 1 / 1.01, 1200);       // имитация активного зума
+  r3.draw(vp3, { columns: 1200 });
+}
+const perFrame = (performance.now() - t0) / frames;
+const fps = 1000 / perFrame;
+note(`отрисовка кадра: ${perFrame.toFixed(2)} мс/кадр → ${fps.toFixed(0)} кадр/с (canvas 2D, software в headless)`);
+check('FPS: измеренное значение выше 30 кадр/с', fps > 30, `${fps.toFixed(0)} кадр/с`);
+
+// --- 6. LOD-пирамида строится быстрее, чем идёт запись ----------------------
+const t1 = performance.now();
+const p4 = new LodPyramid();
+p4.addFrom(s3, 0, 600000);
+const buildMs = performance.now() - t1;
+note(`пирамида на 600 000 пар: ${buildMs.toFixed(0)} мс (${(buildMs / 600).toFixed(2)} мс на 1000 пар, `
+  + `память ${(p4.bytes / 1024).toFixed(0)} КиБ)`);
+check('LOD строится за время меньше реального (600 тыс. пар = 60 с записи)', buildMs < 60000,
+  `${buildMs.toFixed(0)} мс`);
+
+// --- 7. Пиксельная проверка: ровная линия DIO не «дробится», U и I не накладываются ----
+{
+  // данные: D3 держится в 1, а D0/D1/D2 переключаются (как walk1 на стенде)
+  const st = new PairStore({ chunkPairs: 4096 });
+  const n = 20000;
+  for (let k = 0; k < n; k++) {
+    const phase = (k / 256) | 0;
+    let dio = 0x08;
+    if (phase % 3 === 0) dio |= 0x01;
+    if (phase % 3 === 1) dio |= 0x02;
+    if (phase % 3 === 2) dio |= 0x04;
+    st.append(270000 + ((k * 13) % 400) - 200, ((k * 7) % 200) - 100, dio);
+  }
+  const py2 = new LodPyramid();
+  py2.addFrom(st, 0, n);
+  const r = new ChartRenderer(canvas, { source: st, pyramid: py2, calib: { k_bus_mv_per_code: 0.01220703125, k_shunt_ma_per_code: 0.00001953125 } });
+  r.resize(1200, 460, 1);
+  const vp = new Viewport({ pairs: n, pairsPerSecond: 10000 });
+  const ctx = canvas.getContext('2d');
+
+  let flatOk = true, detail = '';
+  for (const span of [200, 2000, 20000]) {          // три масштаба: точный режим и пирамида
+    vp.setRange(0, Math.min(n, span));
+    r.draw(vp, { columns: 1200 });
+    const L = r.layout;
+    const laneH = (L.dio.bottom - L.dio.top) / 8;
+    const yt = Math.round(L.dio.top + 3 * laneH), yb = Math.round(L.dio.top + 4 * laneH);
+    const img = ctx.getImageData(0, yt + 1, 1200, Math.max(1, yb - yt - 2)).data;
+    const heights = [];
+    const tops = [];
+    for (let x = 0; x < 1200; x++) {
+      let top = -1, bot = -1;
+      for (let y = 0; y < yb - yt - 2; y++) {
+        const i = (y * 1200 + x) * 4;
+        const R = img[i], G = img[i + 1], B = img[i + 2];
+        if (G > R + 6 && G > B + 4 && G > 0x30) { if (top < 0) top = y; bot = y; }
+      }
+      if (top >= 0) { heights.push(bot - top + 1); tops.push(top); }
+    }
+    if (!heights.length) { flatOk = false; detail = `масштаб ${span}: линия D3 не найдена`; break; }
+    const hMin = Math.min(...heights), hMax = Math.max(...heights);
+    const tMin = Math.min(...tops), tMax = Math.max(...tops);
+    if (hMax - hMin > 2 || tMax - tMin > 2) {
+      flatOk = false;
+      detail = `масштаб ${span}: высота ${hMin}…${hMax} px, верх ${tMin}…${tMax} px (ожидалась ровная линия)`;
+      break;
+    }
+    detail = `масштаб ${span}: высота ${hMin}…${hMax} px, верх ${tMin}…${tMax} px`;
+  }
+  check('DIO: ровная линия D3 (в 1) не дробится на «зубцы» при любом масштабе', flatOk, detail);
+
+  // U и I в разных панелях: пиксели U выше пикселей I
+  vp.setRange(0, n);
+  r.draw(vp, { columns: 1200 });
+  const img = ctx.getImageData(0, 0, 1200, Math.round(r.layout.panel.bottom)).data;
+  let uMaxY = -1, iMinY = 1e9;
+  for (let y = 0; y < Math.round(r.layout.panel.bottom); y++) {
+    for (let x = 0; x < 1200; x++) {
+      const i = (y * 1200 + x) * 4;
+      const R = img[i], G = img[i + 1], B = img[i + 2];
+      if (B > R + 30 && B > G + 20) uMaxY = Math.max(uMaxY, y);
+      if (R > B + 30 && R > G + 20) iMinY = Math.min(iMinY, y);
+    }
+  }
+  const divY = Math.round(r.layout.dividerY);
+  check('U и I на одной панели, но не перекрываются (разделитель между полосами)',
+    uMaxY >= 0 && iMinY < 1e9 && uMaxY < divY && iMinY > divY,
+    `нижняя строка U ${uMaxY} < разделитель ${divY} < верхняя строка I ${iMinY}`);
+
+  // режим наложения действительно сводит их в одну панель
+  r.overlay = true;
+  r.draw(vp, { columns: 1200 });
+  r.overlay = false;
+  check('режим наложения переключается без ошибок', r.lastFrame && r.lastFrame.totalMs > 0,
+    `${r.lastFrame.totalMs.toFixed(2)} мс`);
+}
+
+note(`Итог: ${pass} пройдено, ${fail} провалено. Полный набор — node --test в source/ch583/WEB_USB/recorder.`);
+</script>
+</body>
+</html>

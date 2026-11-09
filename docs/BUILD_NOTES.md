@@ -179,7 +179,41 @@ bash tools/stage1/flash_baseline.sh --yes     # прошить build/stage1/I2C2
 
 ---
 
-## 8. Прочее окружение (для измерений, не для сборки)
+## 8. Тесты веб-модулей рекордера (Этапы 3–4)
+
+```bash
+# 1) Модульные тесты (Node 24, ESM): парсер, хранилище, формат файла, T1 на 3 млн пар
+cd source/ch583/WEB_USB/recorder && node --test test/*.test.js
+
+# 2) Браузерный harness (headless Chrome): те же модули в браузере + Worker + реальный захват
+bash tools/stage3/browser_selftest.sh                 # все страницы, отчёт в build/stage3-selftest-result.txt
+bash tools/stage3/browser_selftest.sh selftest-view.htm   # только просмотр (LOD, метрики, FPS)
+
+# 3) Ручной запуск страницы-рекордера (Web Serial требует https:// или localhost)
+node tools/stage3/serve.mjs          # http://localhost:8765/recorder/recorder.htm
+node tools/stage3/serve.mjs . 8766   # если нужно отдавать корень репозитория (фикстуры /docs/...)
+```
+
+Грабли, проверенные на практике:
+
+* **`node --test test/` не работает** (Node 24 пытается загрузить каталог как модуль) — нужен шаблон
+  `test/*.test.js`;
+* **`pkill` в этом окружении отсутствует** — фоновые процессы (сервер) останавливать через
+  `kill <pid>` или PowerShell (`Get-NetTCPConnection -LocalPort … | Stop-Process`);
+* **headless Chrome и таймеры:** при `--virtual-time-budget` таймеры «перематываются» мгновенно, поэтому
+  нельзя ждать асинхронные ответы Worker/`fetch` через `setTimeout`, а `--dump-dom` снимает DOM слишком
+  рано. Поэтому harness собирает результаты через `POST /__result` на статический сервер;
+* **ESM в браузере и в Node:** каталог `recorder/` содержит `package.json` с `"type": "module"`
+  (нужен только Node; браузеру он не мешает). Расширения модулей — `.js`, MIME отдаёт сервер;
+* **Chrome с одним профилем не запускается дважды** — для параллельных прогонов использовать
+  разные `--user-data-dir`;
+* **измерение времени в headless:** с `--virtual-time-budget` часы «замораживаются» на время
+  синхронной работы, поэтому FPS/мс в отчёте harness считаются без виртуального времени
+  (обычный запуск с таймаутом и `POST /__result`), а в самом `selftest.htm` такие замеры помечены.
+
+---
+
+## 9. Прочее окружение (для измерений, не для сборки)
 
 * Python 3.13 + pyserial 3.5 доступны (`python -c "import serial"`), поэтому скрипты измерений
   (`tools/stage1/measure_pairs.py`) запускаются без установки зависимостей.

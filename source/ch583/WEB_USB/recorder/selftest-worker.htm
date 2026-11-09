@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>PowerProfiler recorder — self-test воркера</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px 20px; background: #14161a; color: #e6e8ea;
+         font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .muted { color: #8b95a1; font-size: 12px; margin-bottom: 8px; }
+  #out { background: #101215; border: 1px solid #262b33; border-radius: 8px; padding: 10px;
+         font: 12px/1.55 Consolas, monospace; white-space: pre-wrap; }
+  .ok { color: #8ee08e; } .fail { color: #ff8f8f; } .sum { color: #9fd0ff; }
+</style>
+</head>
+<body>
+<h1>Рекордер: self-test воркера</h1>
+<div class="muted">
+  Проверка, что Worker загружается как модуль, принимает поток байтов и считает пары.
+  Отдельная страница без таймеров: в headless-режиме с <code>--virtual-time-budget</code> таймеры
+  срабатывают мгновенно и «съедали» ожидание ответа воркера.
+</div>
+<div id="out"></div>
+
+<script type="module">
+import { openRecord } from './recordfile.js';
+
+const out = document.getElementById('out');
+const report = (line) => { try { fetch('/__result', { method: 'POST', body: line }); } catch (e) { /* ignore */ } };
+
+let pass = 0, fail = 0;
+function check(name, cond, extra = '') {
+  const line = document.createElement('div');
+  line.className = cond ? 'ok' : 'fail';
+  line.textContent = (cond ? '✔ ' : '✖ ') + name + (extra ? '  ' + extra : '');
+  out.appendChild(line);
+  cond ? pass++ : fail++;
+  report((cond ? 'OK   ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+}
+function note(text) {
+  const d = document.createElement('div');
+  d.className = 'sum';
+  d.textContent = text;
+  out.appendChild(d);
+  report('SUM  ' + text);
+}
+function valueAt(k) {
+  return { u: (270000 + ((k * 7919) % 4096)) & 0xFFFFFF, i: ((k * 104729) % 8192) - 4096, dio: (k * 31) & 0xFF };
+}
+function packRange(start, count, pktcnt = 20) {
+  const perBlock = Math.floor(pktcnt / 2);
+  const blocks = Math.ceil(count / perBlock);
+  const outBuf = new Uint8Array(blocks * (2 + perBlock * 7));
+  let off = 0;
+  for (let b = 0; b < blocks; b++) {
+    const first = b * perBlock;
+    const n = Math.min(perBlock, count - first);
+    outBuf[off] = n * 7; outBuf[off + 1] = 0x3A;
+    let p = off + 2;
+    for (let k = 0; k < n; k++) {
+      const v = valueAt(start + first + k);
+      outBuf[p] = v.u & 0xFF; outBuf[p + 1] = (v.u >> 8) & 0xFF; outBuf[p + 2] = (v.u >> 16) & 0xFF;
+      outBuf[p + 3] = v.i & 0xFF; outBuf[p + 4] = (v.i >> 8) & 0xFF; outBuf[p + 5] = (v.i >> 16) & 0xFF;
+      outBuf[p + 6] = v.dio; p += 7;
+    }
+    off += 2 + n * 7;
+  }
+  return outBuf;
+}
+
+let w = null;
+try {
+  w = new Worker('./worker.js', { type: 'module' });
+} catch (e) {
+  check('Worker создан как module', false, String(e));
+}
+if (w) {
+  check('Worker создан как module', true);
+  let saved = null;
+  w.onerror = (e) => check('загрузка воркера без ошибок', false, e.message || e.type || 'error');
+  w.onmessage = async (ev) => {
+    const m = ev.data;
+    if (m.type === 'ready') {
+      check('воркер загрузил модули и ответил на init', true,
+        'потоковая запись в файл: ' + (m.caps.fileSystem ? 'доступна' : 'нет'));
+      w.postMessage({ type: 'start', device: { dev_id: 0x1024, ver: 7 } });
+      w.postMessage({ type: 'bytes', buffer: packRange(0, 1000).buffer });
+      w.postMessage({ type: 'poll' });
+    } else if (m.type === 'started') {
+      check('воркер начал запись', true);
+    } else if (m.type === 'stats' && m.stats.pairs > 0) {
+      if (m.stats.pairs === 1000 && !saved) {
+        saved = m.stats;
+        check('воркер принял поток и насчитал пары', m.stats.pairs === 1000,
+          `${m.stats.pairs} пар, ${(m.stats.bytesStored / 1024).toFixed(0)} КиБ, DIO=0x${(m.stats.lastDio ?? 0).toString(16)}`);
+        w.postMessage({ type: 'save-blob', device: {} });
+      }
+    } else if (m.type === 'blob') {
+      check('воркер отдал файл записи', m.pairs === 1000, `${(m.blob.size / 1024).toFixed(1)} КиБ`);
+      await phaseRealStream();
+    } else if (m.type === 'error') {
+      check('воркер без ошибок', false, m.message);
+      note(`Итог: ${pass} пройдено, ${fail} провалено.`);
+      w.terminate();
+    }
+  };
+  w.postMessage({ type: 'init', cfg: { timeUs: 84, clkKhz: 1300, pktcnt: 20, shuntOhm: 1 } });
+}
+
+/** Фаза 2: прогон реального захвата Этапа 2 через воркер (нарезка по 64 байта, как USB). */
+async function phaseRealStream() {
+  const URL_REAL = '/docs/stage2/stream-84us-pktcnt20.bin';
+  let buf;
+  try {
+    const r = await fetch(URL_REAL);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    buf = new Uint8Array(await r.arrayBuffer());
+  } catch (e) {
+    note('реальный захват не проверен (' + e.message + '): запустите сервер от корня репозитория');
+    note(`Итог: ${pass} пройдено, ${fail} провалено.`);
+    return;
+  }
+  const pairsExpected = 11950;          // посчитано парсерами Этапа 2 (pp.js и Python-viewer)
+  const res = await new Promise((resolve) => {
+    const w2 = new Worker('./worker.js', { type: 'module' });
+    let last = null;
+    let asked = false;
+    w2.onmessage = (ev) => {
+      const m = ev.data;
+      if (m.type === 'ready') {
+        w2.postMessage({ type: 'start', device: {} });
+        for (let off = 0; off < buf.length; off += 64) {
+          const part = buf.subarray(off, Math.min(off + 64, buf.length));
+          w2.postMessage({ type: 'bytes', buffer: part.slice().buffer });
+        }
+        w2.postMessage({ type: 'poll' });
+        // страховка: если stats не придут (пары посчитаны иначе), всё равно просим файл
+        setTimeout(() => { if (!asked) { asked = true; w2.postMessage({ type: 'save-blob', device: {} }); } }, 3000);
+      } else if (m.type === 'stats') {
+        last = m.stats;
+        if (m.stats.pairs === pairsExpected && !asked) {
+          asked = true;
+          w2.postMessage({ type: 'save-blob', device: {} });
+        }
+      } else if (m.type === 'blob') {
+        resolve({ stats: last, blob: m.blob, pairs: m.pairs });
+        w2.terminate();
+      } else if (m.type === 'error') {
+        resolve({ error: m.message });
+        w2.terminate();
+      }
+    };
+    w2.onerror = (e) => resolve({ error: String(e.message || e) });
+    w2.postMessage({ type: 'init', cfg: { timeUs: 84, clkKhz: 1300, pktcnt: 20, shuntOhm: 1 } });
+  });
+  if (res.error) {
+    check('реальный захват: воркер без ошибок', false, res.error);
+  } else {
+    check('реальный захват (86 040 Б, нарезка 64 Б): число пар совпало',
+      res.stats.pairs === pairsExpected, `${res.stats.pairs} из ${pairsExpected}`);
+    check('реальный захват: нет невыровненных кадров и ошибок',
+      res.stats.misaligned === 0 && res.stats.deviceErrors === 0);
+    const file = await openRecord(res.blob);
+    let ok = file.length === res.stats.pairs;
+    for (let k = 0; k < file.length && ok; k += 501) {
+      const a = file.get(k);
+      ok = a.u >= 0 && a.u <= 0xFFFFFF && a.i >= -0x800000 && a.i <= 0x7FFFFF;
+    }
+    check('реальный захват: файл записи открывается, значения в диапазонах', ok,
+      `${file.length} пар, ${(res.blob.size / 1024).toFixed(0)} КиБ`);
+  }
+  note(`Итог: ${pass} пройдено, ${fail} провалено.`);
+}
+</script>
+</body>
+</html>

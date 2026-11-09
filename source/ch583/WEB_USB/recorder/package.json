@@ -1,0 +1,9 @@
+{
+  "name": "powerprofiler-recorder",
+  "private": true,
+  "type": "module",
+  "description": "Модули рекордера PowerProfiler (Этап 3). package.json нужен только для Node (ESM), браузеру он не мешает.",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}

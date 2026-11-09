@@ -1,0 +1,50 @@
+################################################################################
+# MRS Version: 2.5.0
+# Automatically-generated file. Do not edit!
+################################################################################
+
+# Add inputs and outputs from these tool invocations to the build variables 
+C_SRCS += \
+../src/Main.c \
+../src/app_drv_fifo.c \
+../src/app_usb.c \
+../src/cmd_decode.c \
+../src/crc16.c \
+../src/i2c_dev.c \
+../src/i2cbus.c \
+../src/utils.c 
+
+C_DEPS += \
+./src/Main.d \
+./src/app_drv_fifo.d \
+./src/app_usb.d \
+./src/cmd_decode.d \
+./src/crc16.d \
+./src/i2c_dev.d \
+./src/i2cbus.d \
+./src/utils.d 
+
+OBJS += \
+./src/Main.o \
+./src/app_drv_fifo.o \
+./src/app_usb.o \
+./src/cmd_decode.o \
+./src/crc16.o \
+./src/i2c_dev.o \
+./src/i2cbus.o \
+./src/utils.o 
+
+DIR_OBJS += \
+./src/*.o \
+
+DIR_DEPS += \
+./src/*.d \
+
+DIR_EXPANDS += \
+./src/*.234r.expand \
+
+
+# Each subdirectory must supply rules for building sources it contributes
+src/%.o: ../src/%.c
+	@	riscv-none-embed-gcc -march=rv32imac -mabi=ilp32 -mcmodel=medany -msmall-data-limit=8 -mno-save-restore -fmax-errors=20 -Os -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common -g -DDEBUG=1 -I"@PROJ@/StdPeriphDriver/inc" -I"@PROJ@/RVMSIS" -std=gnu99 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@)" -c -o "$@" "$<"
+

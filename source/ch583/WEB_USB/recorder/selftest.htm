@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>PowerProfiler recorder — self-test (без прибора)</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 16px 20px 40px; background: #14161a; color: #e6e8ea;
+         font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  .muted { color: #8b95a1; font-size: 12px; }
+  #out { background: #101215; border: 1px solid #262b33; border-radius: 8px; padding: 10px;
+         font: 12px/1.55 Consolas, monospace; white-space: pre-wrap; }
+  .ok { color: #8ee08e; } .fail { color: #ff8f8f; } .sum { color: #9fd0ff; }
+</style>
+</head>
+<body>
+<h1>Рекордер: self-test в браузере</h1>
+<div class="muted">
+  Те же проверки, что <code>node --test</code> в репозитории, но на модулях, загруженных браузером
+  (парсер, хранилище, round-trip файла записи, Worker). Прибор не нужен: данные синтетические.
+</div>
+<div id="out"></div>
+
+<script type="module">
+import { StreamParser, signed24 } from './parser.js';
+import { Recorder } from './recorder.js';
+import { PairStore } from './store.js';
+import { serializeToBlob, openRecord, readHeader, defaultCalibration } from './recordfile.js';
+
+const out = document.getElementById('out');
+const report = (line) => { try { fetch('/__result', { method: 'POST', body: line }); } catch (e) { /* ignore */ } };
+
+let pass = 0, fail = 0;
+function check(name, cond, extra = '') {
+  const line = document.createElement('div');
+  line.className = cond ? 'ok' : 'fail';
+  line.textContent = (cond ? '✔ ' : '✖ ') + name + (extra ? '  ' + extra : '');
+  out.appendChild(line);
+  cond ? pass++ : fail++;
+  report((cond ? 'OK   ' : 'FAIL ') + name + (extra ? '  ' + extra : ''));
+}
+function note(text) {
+  const line = document.createElement('div');
+  line.className = 'sum';
+  line.textContent = text;
+  out.appendChild(line);
+  report('SUM  ' + text);
+}
+
+// --- упаковка синтетического потока (повторяет прошивку) -------------------
+function valueAt(k) {
+  return { u: (270000 + ((k * 7919) % 4096)) & 0xFFFFFF, i: ((k * 104729) % 8192) - 4096, dio: (k * 31) & 0xFF };
+}
+function packRange(start, count, pktcnt = 20) {
+  const perBlock = Math.floor(pktcnt / 2);
+  const blocks = Math.ceil(count / perBlock);
+  const payload = pktcnt * 3 + Math.floor(pktcnt / 2);
+  const out = new Uint8Array(blocks * (2 + payload));
+  let off = 0;
+  for (let b = 0; b < blocks; b++) {
+    const first = b * perBlock;
+    const n = Math.min(perBlock, count - first);
+    out[off] = n * 7; out[off + 1] = 0x3A;
+    let p = off + 2;
+    for (let k = 0; k < n; k++) {
+      const v = valueAt(start + first + k);
+      out[p] = v.u & 0xFF; out[p + 1] = (v.u >> 8) & 0xFF; out[p + 2] = (v.u >> 16) & 0xFF;
+      out[p + 3] = v.i & 0xFF; out[p + 4] = (v.i >> 8) & 0xFF; out[p + 5] = (v.i >> 16) & 0xFF;
+      out[p + 6] = v.dio; p += 7;
+    }
+    off += 2 + n * 7;
+  }
+  return out;
+}
+
+// --- 1. парсер: нарезка по 1 байту ---------------------------------------
+const N = 4000;
+const stream = packRange(0, N);
+const whole = [], one = [];
+const p1 = new StreamParser({ onPair: (u, i, d) => whole.push([u, i, d]) });
+p1.push(stream);
+const p2 = new StreamParser({ onPair: (u, i, d) => one.push([u, i, d]) });
+for (let k = 0; k < stream.length; k++) p2.push(stream.subarray(k, k + 1));
+check('T2: нарезка по 1 байту = целому потоку', whole.length === N && JSON.stringify(whole) === JSON.stringify(one),
+  `${whole.length} пар`);
+
+// --- 2. знаковость --------------------------------------------------------
+check('T3: U без знака / I знаковое',
+  signed24(0xFFFFFF) === -1 && signed24(0x800000) === -0x800000 && signed24(0x7FFFFF) === 0x7FFFFF);
+
+// --- 3. невыровненный кадр -----------------------------------------------
+let misaligned = 0;
+const p3 = new StreamParser({ onMisalign: () => misaligned++, onPair: () => { throw new Error('пары из плохого кадра'); } });
+p3.push(new Uint8Array([66, 0x3A, ...new Uint8Array(66)]));
+check('невыровненный кадр помечается, пар из него нет', misaligned === 1 && p3.pairs === 0);
+
+// --- 4. хранилище ---------------------------------------------------------
+const st = new PairStore({ chunkPairs: 512 });
+for (let k = 0; k < 2000; k++) st.append(k & 0xFFFFFF, -k, k & 0xFF);
+check('хранилище: 8 байт на пару и доступ по индексу',
+  st.bytes === 4 * 512 * 8 && st.u(1024) === 1024 && st.i(1024) === -1024 && st.dio(1024) === 0);
+
+// --- 5. запись и round-trip ----------------------------------------------
+const rec = new Recorder({ pktcnt: 20, timeUs: 84, clkKhz: 1300, chunkPairs: 1024 });
+rec.push(packRange(0, 5000));
+rec.stop();
+const blob = serializeToBlob(rec.store, rec.meta({ app: { ua: navigator.userAgent } }));
+const file = await openRecord(blob);
+let same = file.length === 5000;
+for (let k = 0; k < file.length && same; k += 97) {
+  const a = file.get(k), b = valueAt(k);
+  same = a.u === b.u && a.i === b.i && a.dio === b.dio;
+}
+check('T7: round-trip файла записи (Blob → openRecord)', same, `${file.length} пар, ${(blob.size / 1024).toFixed(0)} КиБ`);
+check('заголовок: конфигурация и калибровка на месте',
+  file.header.cfg.time_us === 84 && file.header.calib.shunt_ohm === 1
+  && file.header.counts.pairs === 5000);
+const { header, dataOffset } = readHeader(await blob.arrayBuffer());
+check('заголовок читается отдельно от данных', header.format === 'pprec' && dataOffset > 8);
+
+// --- 6. производительность (короткая версия T1) ---------------------------
+const t0 = performance.now();
+const rec2 = new Recorder({ pktcnt: 20 });
+const total = 1_000_000;
+for (let off = 0; off < total; off += 250_000) rec2.push(packRange(off, 250_000));
+const dt = (performance.now() - t0) / 1000;
+const rateText = dt > 0.001
+  ? `${dt.toFixed(2)} с, ${Math.round(total / dt / 1000)} тыс. пар/с`
+  : 'время не измеряется (headless-режим замораживает часы)';   // --virtual-time-budget
+check('T1 (сокращённо): 1 млн пар принят без потерь', rec2.stats.pairs === total,
+  `${rateText}, ${(rec2.stats.bytesStored / 1048576).toFixed(1)} МиБ`);
+
+note(`Итог: ${pass} пройдено, ${fail} провалено. Проверка воркера — selftest-worker.htm; `
+  + `полный набор — node --test в source/ch583/WEB_USB/recorder.`);
+</script>
+</body>
+</html>

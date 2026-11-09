@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PowerProfiler — просмотр демо-записи (без прибора)</title>
+<!--
+  Страница для проверки вида графиков без прибора: те же модули (lod/metrics/viewport/render),
+  синтетическая запись с шумом, «лестницей» нагрузки, импульсом DIO в одну пару и меандрами.
+  Отрисовка синхронная, в главном потоке — удобно смотреть глазами и снимать скриншоты.
+-->
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; padding: 12px 16px 30px; background: #14161a; color: #e6e8ea;
+         font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 17px; margin: 0 0 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+  button { background: #1e2228; color: #e6e8ea; border: 1px solid #333a44; border-radius: 6px;
+           padding: 5px 9px; font: inherit; cursor: pointer; }
+  button.primary { background: #235b8f; border-color: #2d6ea8; }
+  label { display: inline-flex; gap: 5px; align-items: center; }
+  #chart { width: 100%; height: clamp(420px, 58vh, 760px); display: block; background: #101215;
+           border: 1px solid #262b33; border-radius: 8px; }
+  #info { color: #9fb3c8; font: 12px/1.5 Consolas, monospace; white-space: pre-wrap; margin-top: 8px; }
+</style>
+</head>
+<body>
+<h1>Просмотр демо-записи (синтетика, без прибора)</h1>
+<div class="row">
+  <button id="butAll" class="primary">Вся запись</button>
+  <button id="butSec1">1 с</button>
+  <button id="butMs100">100 мс</button>
+  <button id="butImpulse">К импульсу DIO (1 пара)</button>
+  <label><input id="overlay" type="checkbox"> наложить U и I</label>
+  <label><input id="showDio" type="checkbox" checked> дорожки DIO</label>
+  <label><input id="points" type="checkbox" checked> точки отсчётов</label>
+  <label><input id="range" type="checkbox" checked> размах (шум)</label>
+  <label><input id="grid" type="checkbox" checked> сетка значений</label>
+</div>
+<canvas id="chart"></canvas>
+<div id="info"></div>
+
+<script type="module">
+import { Recorder } from './recorder.js';
+import { LodPyramid } from './lod.js';
+import { Viewport } from './viewport.js';
+import { ChartRenderer } from './render.js';
+import { windowMetrics, recordMetrics } from './metrics.js';
+
+// --- синтетическая запись: 5 с при 10 000 пар/с -------------------------------------------
+const PPS = 10000;
+const SECONDS = 5;
+const total = PPS * SECONDS;
+const impulseAt = Math.floor(total * 0.62);
+const st = new Recorder({ pktcnt: 20, timeUs: 50, clkKhz: 1500 });
+let lfsr = 0x1234;
+for (let k = 0; k < total; k++) {
+  lfsr = (lfsr * 1664525 + 1013904223) >>> 0;
+  const noise = ((lfsr >>> 8) & 0x3F) - 32;                  // шум ±0.4 мВ
+  const load = Math.floor(k / (PPS * 0.4));                  // «лестница» нагрузки
+  const u = 270300 + noise + ((load % 7) * 40);
+  const i = ((load % 7) * 60 - 180) + (((lfsr >>> 16) & 0x1F) - 16);
+  let dio = 0;
+  if ((k % 5000) < 2000) dio |= 0x01;                        // меандр D0 (200 мс из 500 мс)
+  if ((k % 8000) < 1000) dio |= 0x04;                        // импульсы D2
+  if (k === impulseAt) dio |= 0x80;                          // импульс D7 шириной в одну пару
+  st.store.append(u, i, dio);
+}
+st.pyramid = new LodPyramid();
+st.pyramid.addFrom(st.store, 0, total);
+
+const calib = { k_bus_mv_per_code: 0.01220703125, k_shunt_ma_per_code: 0.00001953125 };
+const canvas = document.getElementById('chart');
+const renderer = new ChartRenderer(canvas, { source: st.store, pyramid: st.pyramid, calib });
+const vp = new Viewport({ pairs: total, pairsPerSecond: PPS });
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  renderer.resize(Math.max(200, Math.round(r.width)), Math.max(160, Math.round(r.height)),
+                  window.devicePixelRatio || 1);
+}
+function show(label) {
+  const stats = renderer.draw(vp, { columns: Math.max(2, Math.round(renderer.width)) });
+  const prof = renderer.profile || {};
+  const win = windowMetrics(st.pyramid, st.store, Math.floor(vp.from), Math.ceil(vp.to), { withAvg: true });
+  const all = recordMetrics(st.pyramid, calib);
+  document.getElementById('info').textContent =
+    `${label}\nокно: ${vp.startTime.toFixed(3)}…${vp.endTime.toFixed(3)} с (${win.pairs} пар), `
+    + `уровень LOD ${stats.level}${stats.raw ? ' (точный режим)' : ''}\n`
+    + `U: ${(win.minU * calib.k_bus_mv_per_code).toFixed(2)}…${(win.maxU * calib.k_bus_mv_per_code).toFixed(2)} мВ, `
+    + `среднее ${(win.avgU * calib.k_bus_mv_per_code).toFixed(2)} мВ\n`
+    + `I: ${(win.minI * calib.k_shunt_ma_per_code).toFixed(4)}…${(win.maxI * calib.k_shunt_ma_per_code).toFixed(4)} мА, `
+    + `среднее ${(win.avgI * calib.k_shunt_ma_per_code).toFixed(4)} мА\n`
+    + `DIO: активность 0x${(win.dioOr || 0).toString(16).padStart(2, '0').toUpperCase()}, смен ${win.dioChanges}\n`
+    + `вся запись: U ${all.minU_mV.toFixed(1)}…${all.maxU_mV.toFixed(1)} мВ, `
+    + `I ${all.minI_mA.toFixed(4)}…${all.maxI_mA.toFixed(4)} мА, DIO 0x${(all.dioOr || 0).toString(16).toUpperCase()}\n`
+    + `кадр: ${stats.totalMs.toFixed(2)} мс (данные ${stats.buildMs.toFixed(2)} + отрисовка ${stats.drawMs.toFixed(2)}), `
+    + `импульс DIO в паре ${impulseAt} (${(impulseAt / PPS).toFixed(3)} с)
+`
+    + `канва ${Math.round(renderer.width)}x${Math.round(renderer.height)} px; `
+    + `полоса U ${renderer.layout.u.top.toFixed(0)}..${renderer.layout.u.bottom.toFixed(0)}, `
+    + `разделитель ${renderer.layout.dividerY.toFixed(0)}, `
+    + `полоса I ${renderer.layout.i.top.toFixed(0)}..${renderer.layout.i.bottom.toFixed(0)}, `
+    + `DIO ${renderer.layout.dio.top.toFixed(0)}..${renderer.layout.dio.bottom.toFixed(0)}, `
+    + `обзор ${renderer.layout.overview.top.toFixed(0)}..${renderer.layout.overview.bottom.toFixed(0)}
+`
+    + `профиль кадра: шкалы ${(prof.scales || 0).toFixed(1)} мс, графики ${(prof.envelope || 0).toFixed(1)} мс, `
+    + `ось ${(prof.axis || 0).toFixed(1)} мс, DIO ${(prof.dio || 0).toFixed(1)} мс, обзор ${(prof.overview || 0).toFixed(1)} мс`
+    + `
+вид: ${stats.dots ? 'точки отсчётов' : (stats.exact ? 'точный (1 пара/колонка)' : 'прорежено ' + stats.pairsPerColumn.toFixed(1) + ' пар/колонка')}`;
+  try { fetch('/__result', { method: 'POST', body: 'DEMO ' + document.getElementById('info').textContent.split(String.fromCharCode(10)).join(' | ') }); } catch (e) { /* ignore */ }
+}
+
+document.getElementById('butAll').onclick = () => { vp.fit(); show('вся запись'); };
+document.getElementById('butSec1').onclick = () => { vp.setRange(1.0 * PPS, 2.0 * PPS); show('окно 1 с'); };
+document.getElementById('butMs100').onclick = () => { vp.setRange(1.0 * PPS, 1.1 * PPS); show('окно 100 мс'); };
+document.getElementById('butImpulse').onclick = () => {
+  vp.setRange(impulseAt - 40, impulseAt + 40);
+  show('вокруг импульса DIO (±40 пар)');
+};
+document.getElementById('overlay').onchange = (e) => { renderer.overlay = e.target.checked; show('наложение'); };
+document.getElementById('showDio').onchange = (e) => { renderer.showDio = e.target.checked; show('дорожки DIO'); };
+document.getElementById('points').onchange = (e) => { renderer.showPoints = e.target.checked; show('точки отсчётов'); };
+document.getElementById('range').onchange = (e) => { renderer.showRange = e.target.checked; show('размах'); };
+document.getElementById('grid').onchange = (e) => { renderer.showGrid = e.target.checked; show('сетка'); };
+window.addEventListener('resize', () => { resize(); show('после resize'); });
+
+resize();
+vp.fit();
+show('вся запись');
+</script>
+</body>
+</html>

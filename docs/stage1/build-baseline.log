@@ -1,0 +1,61 @@
+C:/MounRiver/MounRiver_Studio2/resources/app/resources/win32/others/Build_Tools/Make/bin/make --no-print-directory main-build 
+Memory region         Used Size  Region Size  %age Used
+           FLASH:       15368 B       448 KB      3.35%
+             RAM:       10064 B        32 KB     30.71%
+riscv-none-embed-size --format=berkeley "I2C2USB.elf"
+   text	   data	    bss	    dec	    hex	filename
+  15244	    124	   4696	  20064	   4e60	I2C2USB.elf
+C:/MounRiver/MounRiver_Studio2/resources/app/resources/win32/others/Build_Tools/Make/bin/make --no-print-directory post-build 
+riscv-none-embed-objcopy -O ihex "I2C2USB.elf" "I2C2USB.hex" && riscv-none-embed-objcopy -O binary "I2C2USB.elf" "I2C2USB.bin"
+   text	   data	    bss	    dec	    hex	filename
+  15244	    124	   4696	  20064	   4e60	D:/2026/PowerProfiler/SimplePowerProfiler_my/build/stage1/I2C2USB/obj/I2C2USB.elf
+
+D:/2026/PowerProfiler/SimplePowerProfiler_my/build/stage1/I2C2USB/obj/I2C2USB.elf:     file format elf32-littleriscv
+
+Sections:
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .init         00000004  00000000  00000000  00001000  2**1
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+  1 .highcodelalign 00000000  00000004  00000004  000064f8  2**0
+                  CONTENTS
+  2 .highcode     0000147c  20000000  00000004  00002000  2**1
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+  3 .text         0000270c  00001480  00001480  00003480  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+  4 .fini         00000000  00003b8c  00003b8c  000064f8  2**0
+                  CONTENTS, ALLOC, LOAD, CODE
+  5 .dlalign      00000000  00003b8c  00003b8c  000064f8  2**0
+                  CONTENTS
+  6 .data         0000007c  2000147c  00003b8c  0000647c  2**2
+                  CONTENTS, ALLOC, LOAD, DATA
+  7 .bss          00001058  200014f8  00003c08  000064f8  2**2
+                  ALLOC
+  8 .stack        00000200  20007e00  20007e00  00006e00  2**0
+                  ALLOC
+  9 .debug_info   0000f58c  00000000  00000000  000064f8  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 10 .debug_abbrev 000023ae  00000000  00000000  00015a84  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 11 .debug_loc    000023af  00000000  00000000  00017e32  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 12 .debug_aranges 00000370  00000000  00000000  0001a1e8  2**3
+                  CONTENTS, READONLY, DEBUGGING
+ 13 .debug_ranges 00000468  00000000  00000000  0001a558  2**3
+                  CONTENTS, READONLY, DEBUGGING
+ 14 .debug_line   000080d5  00000000  00000000  0001a9c0  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 15 .debug_str    00001a27  00000000  00000000  00022a95  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 16 .comment      00000033  00000000  00000000  000244bc  2**0
+                  CONTENTS, READONLY
+ 17 .debug_frame  000010d0  00000000  00000000  000244f0  2**2
+                  CONTENTS, READONLY, DEBUGGING
+ 18 .stab         00000084  00000000  00000000  000255c0  2**2
+                  CONTENTS, READONLY, DEBUGGING
+ 19 .stabstr      00000117  00000000  00000000  00025644  2**0
+                  CONTENTS, READONLY, DEBUGGING
+97331abcd60272ea80cbd5827f3d575bd8c0811ca907cc2b82e1ae32b5f00936 *I2C2USB.elf
+808f11ed628c780083f1459de175eded4907280e37984ba114e3ce43cd9a728a *I2C2USB.bin
+e044ecc3547320989bdc96485de6ea51f68171f550030daf72bda6e6ed96faed *I2C2USB.hex
+  I2C2USB.bin: СОВПАДАЕТ побайтово (808f11ed628c780083f1459de175eded4907280e37984ba114e3ce43cd9a728a)
+  I2C2USB.hex: СОВПАДАЕТ с точностью до переводов строк (sha256 LF: 9563b0aa530df355d15fe692862df700a0370ede4f3054bf71b1fdc2fefe9e5a; CRLF: e044ecc3547320989bdc96485de6ea51f68171f550030daf72bda6e6ed96faed)

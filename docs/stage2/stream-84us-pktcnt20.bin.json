@@ -1,0 +1,17 @@
+{
+ "port": "COM102",
+ "seconds": 2.0,
+ "time_us": 84,
+ "clk_khz": 1300,
+ "pktcnt": 20,
+ "mode": "pairs",
+ "shunt_ohm": 1.0,
+ "group_bytes": 7,
+ "bytes": 86040,
+ "dev_id": 4132,
+ "ver": 7,
+ "ina_mid": 21577,
+ "ina_did": 8833,
+ "sta_rd_cnt": 1375,
+ "sta_to_cnt": 0
+}
